@@ -1,5 +1,3 @@
-import 'package:friends_game_app/features/matchmaking/domain/match_summary.dart';
-
 class LobbyChallenge {
   const LobbyChallenge({
     required this.id,
@@ -11,7 +9,7 @@ class LobbyChallenge {
     required this.expiresAt,
     this.challengerName,
     this.opponentName,
-    this.match,
+    this.matchId,
   });
 
   final String id;
@@ -23,7 +21,8 @@ class LobbyChallenge {
   final DateTime expiresAt;
   final String? challengerName;
   final String? opponentName;
-  final MatchSummary? match;
+  /// Set once accepted: the durable match both players enter.
+  final String? matchId;
 
   factory LobbyChallenge.fromJson(Map<String, dynamic> json) {
     return LobbyChallenge(
@@ -36,7 +35,13 @@ class LobbyChallenge {
       expiresAt: DateTime.tryParse(json['expiresAt']?.toString() ?? '') ?? DateTime.now().toUtc(),
       challengerName: json['challengerName']?.toString(),
       opponentName: json['opponentName']?.toString(),
-      match: json['match'] is Map ? MatchSummary.fromJson(Map<String, dynamic>.from(json['match'] as Map)) : null,
+      matchId: _matchId(json),
     );
+  }
+
+  static String? _matchId(Map<String, dynamic> json) {
+    final match = json['match'];
+    final id = match is Map ? match['id']?.toString() : json['matchId']?.toString();
+    return id == null || id.isEmpty ? null : id;
   }
 }

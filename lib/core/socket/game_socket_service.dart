@@ -21,8 +21,6 @@ const _forwardedServerEvents = <String>[
   'challenge:rejected',
   'challenge:cancelled',
   'challenge:expired',
-  'matchmaking:matched',
-  'matchmaking:lobby_updated',
   'match:started',
   'match:ready',
   'match:chat:message',

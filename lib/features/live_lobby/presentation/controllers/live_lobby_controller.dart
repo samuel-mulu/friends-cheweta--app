@@ -175,15 +175,15 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
     _events?.cancel();
     _statuses?.cancel();
     _events = socket.events.listen(_onEvent);
+    // Rejoin after a reconnect only while the lobby screen is open (mode is
+    // cleared by leave()), so an app resume never creates ghost presence.
     _statuses = socket.statuses.listen((status) {
-      if (status == GameSocketStatus.connected && state.mode != null) {
-        unawaited(join(state.mode!));
-      }
+      final mode = state.mode;
+      if (status == GameSocketStatus.connected && mode != null) unawaited(join(mode));
     });
     ref.onDispose(() {
       _events?.cancel();
       _statuses?.cancel();
-      unawaited(leave());
     });
     return LiveLobbyState(currentUserId: currentUserId);
   }
@@ -212,7 +212,7 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
           currentUserId: currentUserId,
           myState: _parseState(data['myState']),
           activeChallenge: activeChallenge,
-          acceptedMatchId: activeMatch ?? activeChallenge?.match?.id,
+          acceptedMatchId: activeMatch ?? activeChallenge?.matchId,
           messages: _parseMessages(data['recentMessages']),
         );
         state = base.withNormalizedPlayers(_parsePlayers(data['players']));
@@ -227,8 +227,11 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
   Future<void> ready() => _simpleCommand('lobby:ready');
   Future<void> unready() => _simpleCommand('lobby:unready');
 
+  /// Leave the lobby. Local state is reset first so a reconnect racing this
+  /// call cannot rejoin.
   Future<void> leave() async {
     if (state.mode == null) return;
+    state = LiveLobbyState(currentUserId: state.currentUserId);
     try {
       await ref.read(gameSocketServiceProvider).emitWithAck('lobby:leave', {'commandId': _uuid.v4()});
     } catch (_) {}
@@ -297,10 +300,16 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
         'commandId': _uuid.v4(),
         'challengeId': challenge.id,
       });
+      // The accept ack carries the match too, so a lost event cannot strand the player.
+      final data = ack['data'];
+      final matchId = ack['ok'] == true && data is Map
+          ? LobbyChallenge.fromJson(Map<String, dynamic>.from(data)).matchId
+          : null;
       state = state.copyWith(
         busy: false,
         error: ack['ok'] == true ? null : _message(ack),
         clearError: ack['ok'] == true,
+        acceptedMatchId: matchId,
       );
     } catch (_) {
       state = state.copyWith(busy: false, error: 'Challenge command failed.');
@@ -349,7 +358,7 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
           myState: LobbyPlayerState.online,
           busy: false,
           clearError: true,
-          acceptedMatchId: challenge.match?.id,
+          acceptedMatchId: challenge.matchId,
         );
         break;
       case 'match:ready':
@@ -369,9 +378,10 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
       case 'challenge:rejected':
       case 'challenge:cancelled':
       case 'challenge:expired':
+        // The server follows with lobby:player_available for every player it
+        // returned to READY (including us); until then we are just online.
         state = state.copyWith(
-          activeChallenge: LobbyChallenge.fromJson(data),
-          myState: LobbyPlayerState.ready,
+          myState: LobbyPlayerState.online,
           busy: false,
           clearPendingChallenge: true,
           clearError: true,

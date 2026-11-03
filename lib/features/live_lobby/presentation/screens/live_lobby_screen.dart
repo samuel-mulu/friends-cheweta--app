@@ -19,22 +19,23 @@ class LiveLobbyScreen extends ConsumerStatefulWidget {
 }
 
 class _LiveLobbyScreenState extends ConsumerState<LiveLobbyScreen> {
-  bool _started = false;
   int _tab = 0;
   final _messageController = TextEditingController();
+  late final LiveLobbyController _lobby;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_started) return;
-    _started = true;
-    Future.microtask(
-        () => ref.read(liveLobbyControllerProvider.notifier).join(widget.mode));
+  void initState() {
+    super.initState();
+    _lobby = ref.read(liveLobbyControllerProvider.notifier);
+    Future.microtask(() => _lobby.join(widget.mode));
   }
 
   @override
   void dispose() {
     _messageController.dispose();
+    // Lobby membership lives exactly as long as this screen (also on the way
+    // into a match; the server already removed us then, so this is a no-op).
+    Future.microtask(_lobby.leave);
     super.dispose();
   }
 
