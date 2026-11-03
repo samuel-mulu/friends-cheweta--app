@@ -38,7 +38,7 @@ class LudoLobbyScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              'Your stake is locked from your wallet as soon as you mark yourself ready.',
+              'Open a live lobby, mark ready, then connect with another ready player.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 16),

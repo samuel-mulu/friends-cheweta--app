@@ -3,15 +3,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
-import 'package:friends_game_app/core/theme/app_spacing.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:friends_game_app/features/chat/application/match_chat_controller.dart';
+import 'package:friends_game_app/features/chat/domain/chat_message.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board_geometry.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_player_dice_panel.dart';
-import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_player_identity_bar.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_player_strip.dart';
 
 class LudoMatchScreen extends ConsumerStatefulWidget {
   const LudoMatchScreen({super.key, required this.matchId});
@@ -22,17 +24,14 @@ class LudoMatchScreen extends ConsumerStatefulWidget {
 }
 
 class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsBindingObserver {
-  Timer? _ticker;
-  DateTime _now = DateTime.now();
+  String? _pendingTokenId;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _ticker = Timer.periodic(const Duration(milliseconds: 250), (_) {
-      if (mounted) setState(() => _now = ref.read(gameSocketServiceProvider).serverNow());
-    });
     Future.microtask(() => ref.read(ludoMatchControllerProvider.notifier).join(widget.matchId));
+    Future.microtask(() => ref.read(matchChatControllerProvider.notifier).load(widget.matchId));
   }
 
   @override
@@ -45,7 +44,6 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _ticker?.cancel();
     super.dispose();
   }
 
@@ -55,7 +53,17 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     final auth = ref.watch(authControllerProvider);
     final socket = ref.watch(gameSocketStatusProvider);
     final animation = ref.watch(ludoAnimationQueueProvider);
+    final chat = ref.watch(matchChatControllerProvider);
     final snapshot = match.snapshot;
+
+    // Clear local pending token when command settles.
+    if (match.pendingCommandId == null && _pendingTokenId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && ref.read(ludoMatchControllerProvider).pendingCommandId == null) {
+          setState(() => _pendingTokenId = null);
+        }
+      });
+    }
 
     if (match.loading || snapshot == null) {
       return Scaffold(
@@ -68,7 +76,10 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
                     Text(match.error!, textAlign: TextAlign.center),
                     const SizedBox(height: 16),
-                    FilledButton(onPressed: () => ref.read(ludoMatchControllerProvider.notifier).join(widget.matchId), child: const Text('Try again')),
+                    FilledButton(
+                      onPressed: () => ref.read(ludoMatchControllerProvider.notifier).join(widget.matchId),
+                      child: const Text('Try again'),
+                    ),
                   ]),
                 ),
         ),
@@ -77,112 +88,177 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
 
     final game = snapshot.game;
     final me = auth.user?.id;
+    final actionsAllowed = match.pendingCommandId == null &&
+        !match.recovering &&
+        socket == GameSocketStatus.connected;
     final myTurn = me != null && game.currentPlayerId == me;
     final canStartRoll = game.phase == LudoMatchPhase.preGame &&
         game.turnPhase == LudoTurnPhase.startRoll &&
         me != null &&
         snapshot.startingRoll.candidatePlayerIds.contains(me) &&
         !snapshot.startingRoll.rolls.containsKey(me) &&
-        match.pendingCommandId == null;
+        actionsAllowed;
     final canRoll = game.phase == LudoMatchPhase.playing &&
         game.turnPhase == LudoTurnPhase.waitingForRoll &&
         myTurn &&
-        match.pendingCommandId == null;
+        actionsAllowed;
 
-    final tokens = <LudoBoardTokenView>[];
-    for (final player in game.players) {
-      for (var i = 0; i < player.tokens.length; i++) {
-        final token = player.tokens[i];
-        final legal = me == token.ownerId && game.legalTokenIds.contains(token.id) && match.pendingCommandId == null;
-        final capturedEffect = animation.current?.kind == LudoPresentationKind.capture && animation.current!.tokenIds.contains(token.id);
-        tokens.add(LudoBoardTokenView(
-          id: token.id,
-          color: token.color,
-          progress: token.progress,
-          baseIndex: i,
-          highlighted: legal,
-          emphasized: capturedEffect,
-          onTap: legal ? () => ref.read(ludoMatchControllerProvider.notifier).move(token.id) : null,
-        ));
-      }
-    }
-
-    final remaining = _remaining(match.timing?.turnEndsAt);
-    final dicePair = _resolveDicePair(
-      snapshot: snapshot,
-      participants: match.participants,
-      myUserId: me,
-      lastDiceByPlayer: match.lastDiceByPlayer,
+    final tokens = _buildTokens(
+      game: game,
+      me: me,
+      actionsAllowed: actionsAllowed,
       animation: animation.current,
-      animationSequence: animation.sequence,
+      pendingTokenId: _pendingTokenId,
     );
 
+    final ordered = _orderedParticipants(match.participants, snapshot, me);
+    final mine = ordered.isNotEmpty ? ordered.first : null;
+    final opponent = ordered.length > 1 ? ordered[1] : null;
+
+    final dicePair = mine != null && opponent != null
+        ? _resolveDicePair(
+            snapshot: snapshot,
+            mine: mine,
+            opponent: opponent,
+            lastDiceByPlayer: match.lastDiceByPlayer,
+            animation: animation.current,
+            animationSequence: animation.sequence,
+          )
+        : null;
+
+    final scheme = Theme.of(context).colorScheme;
+    final preGame = game.phase == LudoMatchPhase.preGame;
+    final opponentActive = opponent != null && game.currentPlayerId == opponent.userId && !preGame;
+    final meActive = mine != null && game.currentPlayerId == mine.userId && !preGame;
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Ludo · ${_shortId(widget.matchId)}'),
-        actions: [
-          IconButton(
-            tooltip: 'Sync game',
-            onPressed: match.recovering ? null : () => ref.read(ludoMatchControllerProvider.notifier).recover(reason: 'manual_refresh'),
-            icon: match.recovering
-                ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.sync_rounded),
-          ),
-        ],
-      ),
+      backgroundColor: scheme.surface,
       body: SafeArea(
         child: Column(
           children: [
             _ConnectionBanner(status: socket, recovering: match.recovering),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+              child: opponent != null
+                  ? LudoPlayerStrip(
+                      participant: opponent,
+                      myUserId: me,
+                      isActive: opponentActive || (preGame && snapshot.startingRoll.candidatePlayerIds.contains(opponent.userId)),
+                      turnEndsAt: opponentActive ? match.timing?.turnEndsAt : null,
+                      timingEstimated: match.timing?.estimated == true,
+                      startingRoll: preGame ? snapshot.startingRoll.rolls[opponent.userId] : null,
+                      statusOverride: preGame
+                          ? (snapshot.startingRoll.rolls.containsKey(opponent.userId) ? 'Rolled' : 'Rolling…')
+                          : null,
+                    )
+                  : const SizedBox(height: 48),
+            ),
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.screen, 8, AppSpacing.screen, 24),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final side = constraints.maxWidth < constraints.maxHeight
+                      ? constraints.maxWidth
+                      : constraints.maxHeight;
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      child: SizedBox(
+                        width: side,
+                        height: side,
+                        child: LudoBoard(
+                          tokens: tokens,
+                          animatedMove:
+                              animation.current?.kind == LudoPresentationKind.move ? animation.current?.move : null,
+                          animationSequence: animation.sequence,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+              child: mine != null
+                  ? LudoPlayerStrip(
+                      participant: mine,
+                      myUserId: me,
+                      isActive: meActive || canStartRoll,
+                      turnEndsAt: meActive ? match.timing?.turnEndsAt : null,
+                      timingEstimated: match.timing?.estimated == true,
+                      startingRoll: preGame ? snapshot.startingRoll.rolls[mine.userId] : null,
+                      showYouLabel: true,
+                      statusOverride: preGame
+                          ? (canStartRoll
+                              ? 'Tap dice to roll'
+                              : snapshot.startingRoll.rolls.containsKey(mine.userId)
+                                  ? 'Rolled'
+                                  : 'Waiting')
+                          : null,
+                    )
+                  : const SizedBox(height: 48),
+            ),
+            if (match.error != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: _InlineMessage(message: match.error!),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  _PlayersHeader(
-                    snapshot: snapshot,
-                    participants: match.participants,
-                    myUserId: me,
-                    remaining: remaining,
-                    timingEstimated: match.timing?.estimated == true,
-                  ),
-                  const SizedBox(height: 12),
-                  LudoPlayerIdentityBar(
-                    participants: match.participants,
-                    snapshot: snapshot,
-                    myUserId: me,
-                    currentPlayerId: game.currentPlayerId,
-                  ),
-                  const SizedBox(height: 14),
-                  LudoBoard(
-                    tokens: tokens,
-                    animatedMove: animation.current?.kind == LudoPresentationKind.move ? animation.current?.move : null,
-                    animationSequence: animation.sequence,
-                  ),
-                  const SizedBox(height: 18),
-                  if (match.error != null) ...[
-                    _InlineMessage(message: match.error!),
-                    const SizedBox(height: 12),
+                  if (dicePair != null)
+                    LudoPlayerDicePanel(
+                      myParticipant: dicePair.mine,
+                      opponentParticipant: dicePair.opponent,
+                      myDiceValue: dicePair.myDiceValue,
+                      opponentDiceValue: dicePair.opponentDiceValue,
+                      myAnimateKey: dicePair.myAnimateKey,
+                      opponentAnimateKey: dicePair.opponentAnimateKey,
+                      myDiceState: _diceState(
+                        canRoll: canStartRoll || canRoll,
+                        busy: match.pendingCommandId != null || match.recovering,
+                        hasValue: dicePair.myDiceValue != null,
+                        rolling: animation.current?.kind == LudoPresentationKind.dice &&
+                            animation.current?.playerId == dicePair.mine.userId,
+                      ),
+                      opponentDiceState: _diceState(
+                        canRoll: false,
+                        busy: false,
+                        hasValue: dicePair.opponentDiceValue != null,
+                        rolling: animation.current?.kind == LudoPresentationKind.dice &&
+                            animation.current?.playerId == dicePair.opponent.userId,
+                      ),
+                      onRollMine: canStartRoll
+                          ? () => ref.read(ludoMatchControllerProvider.notifier).rollForStart()
+                          : () => ref.read(ludoMatchControllerProvider.notifier).roll(),
+                      preGame: preGame,
+                      headline: _headline(game, me, match.participants, canStartRoll, canRoll),
+                      detail: _detail(game, me, snapshot),
+                    )
+                  else
+                    Text('Waiting for players…', style: Theme.of(context).textTheme.bodyMedium),
+                  if (match.pendingCommandId != null) ...[
+                    const SizedBox(height: 8),
+                    const LinearProgressIndicator(minHeight: 2),
                   ],
-                  _ActionPanel(
-                    snapshot: snapshot,
-                    participants: match.participants,
-                    myUserId: me,
-                    busy: match.pendingCommandId != null,
-                    canStartRoll: canStartRoll,
-                    canRoll: canRoll,
-                    dicePair: dicePair,
-                    onStartRoll: () => ref.read(ludoMatchControllerProvider.notifier).rollForStart(),
-                    onRoll: () => ref.read(ludoMatchControllerProvider.notifier).roll(),
-                    onResign: () => _confirmResign(context),
-                  ),
                   if (game.phase == LudoMatchPhase.finished) ...[
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     FilledButton.icon(
                       onPressed: () => context.pushReplacement('/ludo/result/${widget.matchId}'),
                       icon: const Icon(Icons.emoji_events_outlined),
                       label: const Text('View result & settlement'),
                     ),
                   ],
+                  const SizedBox(height: 6),
+                  _BottomBar(
+                    unread: chat.unread,
+                    sessionCode: match.sessionCode,
+                    recovering: match.recovering,
+                    onChat: () => _openChat(context),
+                    onMenu: () => _openMenu(context, match),
+                  ),
                 ],
               ),
             ),
@@ -192,10 +268,131 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     );
   }
 
-  Duration? _remaining(DateTime? deadline) {
-    if (deadline == null) return null;
-    final value = deadline.difference(_now);
-    return value.isNegative ? Duration.zero : value;
+  List<LudoBoardTokenView> _buildTokens({
+    required LudoGameState game,
+    required String? me,
+    required bool actionsAllowed,
+    required LudoPresentationEvent? animation,
+    required String? pendingTokenId,
+  }) {
+    final raw = <({LudoToken token, int baseIndex})>[];
+    for (final player in game.players) {
+      for (var i = 0; i < player.tokens.length; i++) {
+        raw.add((token: player.tokens[i], baseIndex: i));
+      }
+    }
+
+    final groups = <String, List<int>>{};
+    for (var i = 0; i < raw.length; i++) {
+      final item = raw[i];
+      final key = LudoBoardGeometry.occupancyKey(
+        color: item.token.color,
+        progress: item.token.progress,
+        tokenId: item.token.id,
+      );
+      groups.putIfAbsent(key, () => []).add(i);
+    }
+
+    final stackIndexByToken = <String, int>{};
+    final stackCountByToken = <String, int>{};
+    for (final entry in groups.entries) {
+      final indexes = entry.value;
+      final count = indexes.length;
+      for (var s = 0; s < indexes.length; s++) {
+        final tokenId = raw[indexes[s]].token.id;
+        stackIndexByToken[tokenId] = s;
+        stackCountByToken[tokenId] = count;
+      }
+    }
+
+    return [
+      for (final item in raw)
+        LudoBoardTokenView(
+          id: item.token.id,
+          color: item.token.color,
+          progress: item.token.progress,
+          baseIndex: item.baseIndex,
+          highlighted: me == item.token.ownerId &&
+              game.legalTokenIds.contains(item.token.id) &&
+              actionsAllowed &&
+              pendingTokenId == null,
+          emphasized: animation?.kind == LudoPresentationKind.capture &&
+              (animation?.tokenIds.contains(item.token.id) ?? false),
+          pending: pendingTokenId == item.token.id,
+          finished: item.token.state == LudoTokenState.finished || item.token.progress > 56,
+          stackIndex: stackIndexByToken[item.token.id] ?? 0,
+          stackCount: stackCountByToken[item.token.id] ?? 1,
+          onTap: me == item.token.ownerId &&
+                  game.legalTokenIds.contains(item.token.id) &&
+                  actionsAllowed &&
+                  pendingTokenId == null
+              ? () {
+                  setState(() => _pendingTokenId = item.token.id);
+                  ref.read(ludoMatchControllerProvider.notifier).move(item.token.id);
+                }
+              : null,
+        ),
+    ];
+  }
+
+  LudoDiceVisualState _diceState({
+    required bool canRoll,
+    required bool busy,
+    required bool hasValue,
+    required bool rolling,
+  }) {
+    if (rolling) return LudoDiceVisualState.rolling;
+    if (canRoll && !busy) return LudoDiceVisualState.ready;
+    if (busy) return LudoDiceVisualState.disabled;
+    if (hasValue) return LudoDiceVisualState.result;
+    return LudoDiceVisualState.waiting;
+  }
+
+  String _headline(
+    LudoGameState game,
+    String? me,
+    List<LudoMatchParticipant> participants,
+    bool canStartRoll,
+    bool canRoll,
+  ) {
+    if (game.phase == LudoMatchPhase.finished) return 'Match finished';
+    if (game.phase == LudoMatchPhase.preGame) {
+      if (canStartRoll) return 'Roll to decide who starts';
+      return 'Waiting for starting rolls';
+    }
+    if (game.turnPhase == LudoTurnPhase.waitingForMove) {
+      return game.currentPlayerId == me ? 'Choose a token' : '${_playerName(game.currentPlayerId, me, participants)} is choosing';
+    }
+    if (canRoll) return 'Your turn — roll';
+    return game.currentPlayerId == me ? 'Roll when ready' : '${_playerName(game.currentPlayerId, me, participants)} is playing';
+  }
+
+  String _detail(LudoGameState game, String? me, LudoRuntimeSnapshot snapshot) {
+    if (game.phase == LudoMatchPhase.finished) {
+      final won = game.winnerOrder.isNotEmpty && game.winnerOrder.first == me;
+      return won ? 'You won. Settlement is handled by the server.' : 'Result confirmed by the server.';
+    }
+    if (game.phase == LudoMatchPhase.preGame) {
+      final rolls = snapshot.startingRoll.rolls;
+      if (rolls.length >= 2) {
+        final values = rolls.values.toList();
+        if (values[0] == values[1]) return 'Tie — roll again';
+      }
+      return 'Highest roll starts the match.';
+    }
+    if (game.turnPhase == LudoTurnPhase.waitingForMove && game.currentPlayerId == me) {
+      return '${game.legalTokenIds.length} legal move${game.legalTokenIds.length == 1 ? '' : 's'}';
+    }
+    return '';
+  }
+
+  String _playerName(String? userId, String? me, List<LudoMatchParticipant> participants) {
+    if (userId == null) return 'Opponent';
+    if (userId == me) return 'You';
+    for (final participant in participants) {
+      if (participant.userId == userId) return participant.displayLabel(myUserId: me);
+    }
+    return 'Opponent';
   }
 
   Future<void> _confirmResign(BuildContext context) async {
@@ -213,7 +410,231 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     if (confirmed == true) await ref.read(ludoMatchControllerProvider.notifier).resign();
   }
 
-  String _shortId(String value) => value.length <= 8 ? value : value.substring(0, 8);
+  Future<void> _openChat(BuildContext context) async {
+    final controller = ref.read(matchChatControllerProvider.notifier);
+    controller.setPanelOpen(true);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => const _MatchChatSheet(),
+    );
+    controller.setPanelOpen(false);
+  }
+
+  Future<void> _openMenu(BuildContext context, LudoMatchViewState match) async {
+    final game = match.snapshot?.game;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (match.sessionCode != null && match.sessionCode!.isNotEmpty)
+                ListTile(
+                  leading: const Icon(Icons.tag_rounded),
+                  title: Text('Game ${match.sessionCode}'),
+                  subtitle: const Text('Session code'),
+                ),
+              ListTile(
+                leading: match.recovering
+                    ? const SizedBox.square(dimension: 22, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.sync_rounded),
+                title: const Text('Sync game'),
+                onTap: match.recovering
+                    ? null
+                    : () {
+                        Navigator.pop(context);
+                        ref.read(ludoMatchControllerProvider.notifier).recover(reason: 'manual_refresh');
+                      },
+              ),
+              if (game?.phase != LudoMatchPhase.finished)
+                ListTile(
+                  leading: Icon(Icons.flag_outlined, color: Theme.of(context).colorScheme.error),
+                  title: Text('Resign', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _confirmResign(context);
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.close_rounded),
+                title: const Text('Close'),
+                onTap: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _BottomBar extends StatelessWidget {
+  const _BottomBar({
+    required this.unread,
+    required this.sessionCode,
+    required this.recovering,
+    required this.onChat,
+    required this.onMenu,
+  });
+
+  final int unread;
+  final String? sessionCode;
+  final bool recovering;
+  final VoidCallback onChat;
+  final VoidCallback onMenu;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        IconButton(
+          tooltip: 'Match chat',
+          onPressed: onChat,
+          icon: Badge(
+            isLabelVisible: unread > 0,
+            label: Text(unread.toString()),
+            child: const Icon(Icons.chat_bubble_outline),
+          ),
+        ),
+        if (sessionCode != null && sessionCode!.isNotEmpty)
+          Expanded(
+            child: Text(
+              'Game $sessionCode',
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          )
+        else
+          const Spacer(),
+        IconButton(
+          tooltip: 'Menu',
+          onPressed: onMenu,
+          icon: recovering
+              ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.more_horiz_rounded),
+        ),
+      ],
+    );
+  }
+}
+
+class _MatchChatSheet extends ConsumerStatefulWidget {
+  const _MatchChatSheet();
+
+  @override
+  ConsumerState<_MatchChatSheet> createState() => _MatchChatSheetState();
+}
+
+class _MatchChatSheetState extends ConsumerState<_MatchChatSheet> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chat = ref.watch(matchChatControllerProvider);
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottom),
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.58,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+              child: Row(
+                children: [
+                  Expanded(child: Text('Match Chat', style: Theme.of(context).textTheme.titleMedium)),
+                  IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+                ],
+              ),
+            ),
+            if (chat.error != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(chat.error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
+            Expanded(
+              child: chat.loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : chat.messages.isEmpty
+                      ? const Center(child: Text('No match messages yet.'))
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          itemCount: chat.messages.length,
+                          itemBuilder: (context, index) => _ChatLine(message: chat.messages[index]),
+                        ),
+            ),
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _controller,
+                        maxLength: 160,
+                        minLines: 1,
+                        maxLines: 3,
+                        decoration: const InputDecoration(hintText: 'Message...', counterText: ''),
+                        onSubmitted: (_) => _send(chat.sending),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.filled(
+                      onPressed: chat.sending ? null : () => _send(false),
+                      icon: chat.sending
+                          ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.send_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _send(bool sending) {
+    if (sending) return;
+    final text = _controller.text;
+    _controller.clear();
+    ref.read(matchChatControllerProvider.notifier).send(text);
+  }
+}
+
+class _ChatLine extends StatelessWidget {
+  const _ChatLine({required this.message});
+  final ChatMessage message;
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        title: Text(message.sender.displayName, style: Theme.of(context).textTheme.labelLarge),
+        subtitle: Text(message.text),
+        trailing: Text(_time(message.createdAt), style: Theme.of(context).textTheme.labelSmall),
+      );
+
+  String _time(DateTime value) {
+    final local = value.toLocal();
+    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
 }
 
 class _PlayerDicePair {
@@ -234,20 +655,14 @@ class _PlayerDicePair {
   final int opponentAnimateKey;
 }
 
-_PlayerDicePair? _resolveDicePair({
+_PlayerDicePair _resolveDicePair({
   required LudoRuntimeSnapshot snapshot,
-  required List<LudoMatchParticipant> participants,
-  required String? myUserId,
+  required LudoMatchParticipant mine,
+  required LudoMatchParticipant opponent,
   required Map<String, int> lastDiceByPlayer,
   required LudoPresentationEvent? animation,
   required int animationSequence,
 }) {
-  final ordered = _orderedParticipants(participants, snapshot, myUserId);
-  if (ordered.length < 2) return null;
-
-  final mine = ordered[0];
-  final opponent = ordered[1];
-
   int? diceFor(String userId) {
     if (animation?.kind == LudoPresentationKind.dice && animation?.playerId == userId) {
       return animation?.diceValue;
@@ -299,181 +714,36 @@ class _ConnectionBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     if (status == GameSocketStatus.connected && !recovering) return const SizedBox.shrink();
     final text = recovering
-        ? 'Recovering authoritative match state…'
+        ? 'Recovering match…'
         : status == GameSocketStatus.connecting || status == GameSocketStatus.recovering
             ? 'Reconnecting…'
-            : 'Connection lost. Your board is preserved while the server reconnects.';
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-      color: Theme.of(context).colorScheme.secondaryContainer,
-      child: Text(text, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
-    );
-  }
-}
-
-class _PlayersHeader extends StatelessWidget {
-  const _PlayersHeader({
-    required this.snapshot,
-    required this.participants,
-    required this.myUserId,
-    required this.remaining,
-    required this.timingEstimated,
-  });
-  final LudoRuntimeSnapshot snapshot;
-  final List<LudoMatchParticipant> participants;
-  final String? myUserId;
-  final Duration? remaining;
-  final bool timingEstimated;
-
-  String _nameFor(String? userId) {
-    if (userId == null) return 'Player';
-    for (final participant in participants) {
-      if (participant.userId == userId) return participant.fullName;
-    }
-    return 'Player';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final game = snapshot.game;
-    final current = game.currentPlayerId;
-    final currentName = current == myUserId ? 'Your turn' : '${_nameFor(current)}\'s turn';
-    final secs = remaining?.inSeconds;
-    return Row(
-      children: [
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(
-              game.phase == LudoMatchPhase.preGame ? 'Starting roll' : currentName,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 3),
-            Text(_phaseText(game), style: Theme.of(context).textTheme.bodySmall),
-          ]),
-        ),
-        if (secs != null)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(999)),
-            child: Text('${secs}s${timingEstimated ? ' ~' : ''}', style: Theme.of(context).textTheme.labelLarge),
-          ),
-      ],
-    );
-  }
-
-  String _phaseText(LudoGameState game) => switch (game.turnPhase) {
-        LudoTurnPhase.startRoll => 'Both players roll to determine who starts.',
-        LudoTurnPhase.waitingForRoll => 'Waiting for the authoritative server roll.',
-        LudoTurnPhase.waitingForMove => 'Choose one of the highlighted legal tokens.',
-        LudoTurnPhase.complete => 'Match complete.',
-      };
-}
-
-class _ActionPanel extends StatelessWidget {
-  const _ActionPanel({
-    required this.snapshot,
-    required this.participants,
-    required this.myUserId,
-    required this.busy,
-    required this.canStartRoll,
-    required this.canRoll,
-    required this.dicePair,
-    required this.onStartRoll,
-    required this.onRoll,
-    required this.onResign,
-  });
-  final LudoRuntimeSnapshot snapshot;
-  final List<LudoMatchParticipant> participants;
-  final String? myUserId;
-  final bool busy;
-  final bool canStartRoll;
-  final bool canRoll;
-  final _PlayerDicePair? dicePair;
-  final VoidCallback onStartRoll;
-  final VoidCallback onRoll;
-  final VoidCallback onResign;
-
-  @override
-  Widget build(BuildContext context) {
-    final game = snapshot.game;
-    final isFinished = game.phase == LudoMatchPhase.finished;
-    final canRollMine = canStartRoll || canRoll;
-
-    return Card(
+            : 'Connection lost — board preserved';
+    return Material(
+      color: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.85),
       child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
           children: [
-            if (dicePair != null)
-              LudoPlayerDicePanel(
-                myParticipant: dicePair!.mine,
-                opponentParticipant: dicePair!.opponent,
-                myDiceValue: dicePair!.myDiceValue,
-                opponentDiceValue: dicePair!.opponentDiceValue,
-                myAnimateKey: dicePair!.myAnimateKey,
-                opponentAnimateKey: dicePair!.opponentAnimateKey,
-                canRollMine: canRollMine,
-                onRollMine: canStartRoll ? onStartRoll : onRoll,
-                busy: busy,
-              )
-            else
-              Text('Waiting for players…', style: Theme.of(context).textTheme.bodyMedium),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(_headline(game), style: Theme.of(context).textTheme.titleMedium),
-                      const SizedBox(height: 4),
-                      Text(_detail(game), style: Theme.of(context).textTheme.bodySmall),
-                      if (busy) ...[
-                        const SizedBox(height: 10),
-                        const LinearProgressIndicator(minHeight: 2),
-                      ],
-                    ],
-                  ),
-                ),
-                if (!isFinished)
-                  IconButton(tooltip: 'Resign', onPressed: busy ? null : onResign, icon: const Icon(Icons.flag_outlined)),
-              ],
+            SizedBox.square(
+              dimension: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Theme.of(context).colorScheme.onSecondaryContainer,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                text,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSecondaryContainer,
+                    ),
+              ),
             ),
           ],
         ),
       ),
     );
-  }
-
-  String _headline(LudoGameState game) {
-    if (game.phase == LudoMatchPhase.finished) return 'Match finished';
-    if (game.phase == LudoMatchPhase.preGame) return canStartRoll ? 'Tap your dice to roll' : 'Waiting for starting rolls';
-    if (game.turnPhase == LudoTurnPhase.waitingForMove) {
-      return game.currentPlayerId == myUserId ? 'Choose a token' : '${_playerName(game.currentPlayerId)} is choosing';
-    }
-    return game.currentPlayerId == myUserId ? 'Roll your dice when ready' : '${_playerName(game.currentPlayerId)} is playing';
-  }
-
-  String _playerName(String? userId) {
-    if (userId == null) return 'Opponent';
-    if (userId == myUserId) return 'You';
-    for (final participant in participants) {
-      if (participant.userId == userId) return participant.fullName;
-    }
-    return 'Opponent';
-  }
-
-  String _detail(LudoGameState game) {
-    if (game.phase == LudoMatchPhase.finished) {
-      final won = game.winnerOrder.isNotEmpty && game.winnerOrder.first == myUserId;
-      return won ? 'You won. Settlement is handled by the server.' : 'Result confirmed by the server.';
-    }
-    if (game.turnPhase == LudoTurnPhase.waitingForMove && game.currentPlayerId == myUserId) {
-      return '${game.legalTokenIds.length} legal move${game.legalTokenIds.length == 1 ? '' : 's'} available.';
-    }
-    return 'Game state version ${game.version}';
   }
 }
 
@@ -482,8 +752,13 @@ class _InlineMessage extends StatelessWidget {
   final String message;
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: Theme.of(context).colorScheme.errorContainer, borderRadius: BorderRadius.circular(12)),
-        child: Text(message, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(message, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer, fontSize: 13)),
       );
 }

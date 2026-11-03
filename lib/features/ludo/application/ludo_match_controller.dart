@@ -21,6 +21,7 @@ class LudoMatchViewState {
     this.error,
     this.turnDurationSeconds = 30,
     this.cancelledReason,
+    this.sessionCode,
   });
 
   final String? matchId;
@@ -34,6 +35,7 @@ class LudoMatchViewState {
   final String? error;
   final int turnDurationSeconds;
   final String? cancelledReason;
+  final String? sessionCode;
 
   int get version => snapshot?.game.version ?? -1;
   bool get ready => snapshot != null;
@@ -52,6 +54,7 @@ class LudoMatchViewState {
     bool clearError = false,
     int? turnDurationSeconds,
     String? cancelledReason,
+    String? sessionCode,
   }) =>
       LudoMatchViewState(
         matchId: matchId ?? this.matchId,
@@ -65,6 +68,7 @@ class LudoMatchViewState {
         error: clearError ? null : error ?? this.error,
         turnDurationSeconds: turnDurationSeconds ?? this.turnDurationSeconds,
         cancelledReason: cancelledReason ?? this.cancelledReason,
+        sessionCode: sessionCode ?? this.sessionCode,
       );
 }
 
@@ -459,6 +463,10 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
       if (rawMode is Map) {
         final seconds = int.tryParse(rawMode['turnDurationSeconds']?.toString() ?? '');
         if (seconds != null && seconds > 0) state = state.copyWith(turnDurationSeconds: seconds);
+      }
+      final sessionCode = json['sessionCode']?.toString();
+      if (sessionCode != null && sessionCode.isNotEmpty) {
+        state = state.copyWith(sessionCode: sessionCode);
       }
       final rawParticipants = json['participants'];
       if (rawParticipants is List && rawParticipants.isNotEmpty && state.participants.isEmpty) {

@@ -8,9 +8,24 @@ import 'package:friends_game_app/core/storage/secure_storage.dart';
 const _forwardedServerEvents = <String>[
   'session:ready',
   'session:error',
+  'lobby:player_joined',
+  'lobby:player_left',
+  'lobby:player_ready',
+  'lobby:player_unready',
+  'lobby:player_busy',
+  'lobby:player_available',
+  'lobby:chat:message',
+  'challenge:created',
+  'challenge:received',
+  'challenge:accepted',
+  'challenge:rejected',
+  'challenge:cancelled',
+  'challenge:expired',
   'matchmaking:matched',
   'matchmaking:lobby_updated',
   'match:started',
+  'match:ready',
+  'match:chat:message',
   'match:finished',
   'match:cancelled',
   'ludo:starting_roll',
@@ -66,7 +81,7 @@ class GameSocketService {
 
     await _disposeSocket();
     final socket = io.io(
-      '${AppConfig.development.socketBaseUrl}/game',
+      '${AppConfig.current.socketBaseUrl}/game',
       io.OptionBuilder()
           .setTransports(['websocket'])
           .disableAutoConnect()
@@ -105,7 +120,7 @@ class GameSocketService {
 
     socket.connect();
     return completer.future.timeout(
-      const Duration(seconds: 12),
+      const Duration(seconds: 45),
       onTimeout: () {
         _setStatus(GameSocketStatus.disconnected);
         throw TimeoutException('Socket connection timed out.');

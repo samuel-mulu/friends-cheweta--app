@@ -42,8 +42,8 @@ class _MatchmakingScreenState extends ConsumerState<MatchmakingScreen> {
   String _statusMessage(MatchmakingState state) {
     return switch (state.phase) {
       MatchmakingPhase.browsing => 'Tap ready to join the live lobby for this room.',
-      MatchmakingPhase.waitingInLobby => 'You are in the live lobby. Waiting for one more ready player.',
-      MatchmakingPhase.pairing => 'Two players are ready. Starting the match…',
+      MatchmakingPhase.waitingInLobby => 'You are in the live lobby. Other players can challenge you.',
+      MatchmakingPhase.pairing => 'Starting the challenge…',
       MatchmakingPhase.matchFound => 'Opponent found. Get ready…',
       MatchmakingPhase.enteringMatch => 'Entering the table…',
     };
@@ -81,7 +81,7 @@ class _MatchmakingScreenState extends ConsumerState<MatchmakingScreen> {
                     Text(_statusMessage(state), style: Theme.of(context).textTheme.bodyMedium),
                     const SizedBox(height: 8),
                     Text(
-                      'Stake ${MoneyFormatter.minorToEtb(BigInt.from(widget.mode.stakeAmountMinor))} locks when you go ready. When 2 players are ready, the match starts automatically.',
+                      'Stake ${MoneyFormatter.minorToEtb(BigInt.from(widget.mode.stakeAmountMinor))} locks when you go ready. Ready players appear here live, and any available player can tap Play to start.',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     const SizedBox(height: 12),
@@ -116,7 +116,15 @@ class _MatchmakingScreenState extends ConsumerState<MatchmakingScreen> {
                           : ListView.separated(
                               itemCount: players.length,
                               separatorBuilder: (_, __) => const SizedBox(height: 8),
-                              itemBuilder: (context, index) => _ReadyPlayerTile(player: players[index]),
+                              itemBuilder: (context, index) => _ReadyPlayerTile(
+                                player: players[index],
+                                canChallenge: socket == GameSocketStatus.connected &&
+                                    !state.busy &&
+                                    !state.isReady &&
+                                    !state.isMatched &&
+                                    !players[index].isSelf,
+                                onChallenge: () => controller.challenge(widget.mode.id, players[index].ticketId),
+                              ),
                             ),
                     ),
                     if (!state.isMatched && state.isReady)
@@ -190,7 +198,7 @@ class _EmptyReadyList extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             isReady
-                ? 'Other players will see your name here in real time.'
+                ? 'Other players will see your name here in real time and can tap Play.'
                 : 'Go ready and your name will appear in this shared lobby.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodySmall,
@@ -202,9 +210,15 @@ class _EmptyReadyList extends StatelessWidget {
 }
 
 class _ReadyPlayerTile extends StatelessWidget {
-  const _ReadyPlayerTile({required this.player});
+  const _ReadyPlayerTile({
+    required this.player,
+    required this.canChallenge,
+    required this.onChallenge,
+  });
 
   final ReadyPlayer player;
+  final bool canChallenge;
+  final VoidCallback onChallenge;
 
   @override
   Widget build(BuildContext context) {
@@ -221,13 +235,16 @@ class _ReadyPlayerTile extends StatelessWidget {
         ),
         title: Text(player.isSelf ? '${player.displayName} (You)' : player.displayName),
         subtitle: Text('Ready • ${MoneyFormatter.minorToEtb(BigInt.from(player.stakeAmountMinor))} locked'),
-        trailing: Chip(
-          label: Text(player.isSelf ? 'You' : 'Waiting'),
-          avatar: Icon(
-            player.isSelf ? Icons.check_circle_outline : Icons.circle_outlined,
-            size: 16,
-          ),
-        ),
+        trailing: player.isSelf
+            ? const Chip(
+                label: Text('Ready'),
+                avatar: Icon(Icons.check_circle_outline, size: 16),
+              )
+            : FilledButton.icon(
+                onPressed: canChallenge ? onChallenge : null,
+                icon: const Icon(Icons.sports_esports_rounded, size: 16),
+                label: const Text('Play'),
+              ),
       ),
     );
   }

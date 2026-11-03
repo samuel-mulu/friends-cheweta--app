@@ -17,4 +17,12 @@ void main() {
       expect(LudoBoardGeometry.homePaths[color]?.length, 5);
     }
   });
+
+  test('occupancy keys group track cells across colors', () {
+    // Red progress 13 and green progress 0 share global index 13.
+    final red = LudoBoardGeometry.occupancyKey(color: LudoColor.red, progress: 13, tokenId: 'a');
+    final green = LudoBoardGeometry.occupancyKey(color: LudoColor.green, progress: 0, tokenId: 'b');
+    expect(red, green);
+    expect(red, 'track-13');
+  });
 }

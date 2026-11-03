@@ -15,7 +15,7 @@ import 'package:friends_game_app/features/history/presentation/screens/match_rep
 import 'package:friends_game_app/features/home/presentation/screens/home_screen.dart';
 import 'package:friends_game_app/features/ludo/presentation/screens/ludo_match_screen.dart';
 import 'package:friends_game_app/features/ludo/presentation/screens/ludo_result_screen.dart';
-import 'package:friends_game_app/features/matchmaking/presentation/screens/matchmaking_screen.dart';
+import 'package:friends_game_app/features/live_lobby/presentation/screens/live_lobby_screen.dart';
 import 'package:friends_game_app/features/notifications/presentation/screens/notifications_screen.dart';
 import 'package:friends_game_app/features/payments/presentation/screens/deposit_screen.dart';
 import 'package:friends_game_app/features/payments/presentation/screens/withdrawal_screen.dart';
@@ -58,7 +58,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/ludo/matchmaking',
         builder: (_, state) {
           final mode = state.extra;
-          if (mode is GameMode) return MatchmakingScreen(mode: mode);
+          if (mode is GameMode) return LiveLobbyScreen(mode: mode);
           return const Scaffold(body: Center(child: Text('Choose a Ludo room first.')));
         },
       ),

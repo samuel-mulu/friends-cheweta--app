@@ -9,6 +9,7 @@ class MatchSummary {
     required this.rulesVersion,
     required this.gameMode,
     this.participants = const [],
+    this.sessionCode,
   });
 
   final String id;
@@ -17,6 +18,7 @@ class MatchSummary {
   final String rulesVersion;
   final GameMode gameMode;
   final List<MatchParticipantSummary> participants;
+  final String? sessionCode;
 
   String? opponentName(String selfUserId) {
     for (final participant in participants) {
@@ -33,6 +35,7 @@ class MatchSummary {
       status: json['status']?.toString() ?? '',
       stakeAmountMinor: int.tryParse(json['stakeAmountMinor']?.toString() ?? '') ?? 0,
       rulesVersion: json['rulesVersion']?.toString() ?? '',
+      sessionCode: json['sessionCode']?.toString(),
       gameMode: rawMode is Map
           ? GameMode.fromJson(Map<String, dynamic>.from(rawMode))
           : const GameMode(

@@ -110,6 +110,30 @@ class MatchmakingController extends Notifier<MatchmakingState> {
     }
   }
 
+  Future<void> challenge(String gameModeId, String ticketId) async {
+    if (state.busy || state.isMatched || state.isReady || ticketId.isEmpty) return;
+    state = state.copyWith(busy: true, phase: MatchmakingPhase.pairing, clearError: true, clearMatch: true);
+    try {
+      final ack = await ref.read(gameSocketServiceProvider).emitWithAck(
+        'matchmaking:join',
+        {'gameModeId': gameModeId, 'ticketId': ticketId},
+      );
+      _applyAck(ack, fallbackModeId: gameModeId);
+      unawaited(ref.read(walletControllerProvider.notifier).refresh());
+      if (ack['ok'] != true) {
+        state = state.copyWith(phase: MatchmakingPhase.browsing);
+        unawaited(refreshLobby(gameModeId));
+      }
+    } catch (_) {
+      state = state.copyWith(
+        phase: MatchmakingPhase.browsing,
+        busy: false,
+        error: 'Could not challenge that player. Please try again.',
+      );
+      unawaited(refreshLobby(gameModeId));
+    }
+  }
+
   Future<void> refreshLobby(String gameModeId) async {
     if (state.isMatched) return;
     try {
@@ -295,6 +319,12 @@ class MatchmakingController extends Notifier<MatchmakingState> {
         return 'You are already ready in another room.';
       case 'GAME_MODE_NOT_AVAILABLE':
         return 'This Ludo room is not available right now.';
+      case 'READY_PLAYER_NOT_FOUND':
+        return 'That player is no longer ready. The lobby was refreshed.';
+      case 'CANNOT_CHALLENGE_SELF':
+        return 'Choose another ready player to start a match.';
+      case 'RESOURCE_BUSY':
+        return 'The live lobby is updating. Please try again in a moment.';
       case 'ACK_TIMEOUT':
         return 'The server is taking longer than expected. Your status will be recovered automatically.';
       default:

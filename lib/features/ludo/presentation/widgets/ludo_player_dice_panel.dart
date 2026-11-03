@@ -3,6 +3,7 @@ import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_dice.dart';
 
+/// Bottom dice / start-roll action cluster for the locked playfield.
 class LudoPlayerDicePanel extends StatelessWidget {
   const LudoPlayerDicePanel({
     super.key,
@@ -12,9 +13,12 @@ class LudoPlayerDicePanel extends StatelessWidget {
     required this.opponentDiceValue,
     required this.myAnimateKey,
     required this.opponentAnimateKey,
-    required this.canRollMine,
+    required this.myDiceState,
+    required this.opponentDiceState,
     required this.onRollMine,
-    this.busy = false,
+    this.preGame = false,
+    this.headline,
+    this.detail,
   });
 
   final LudoMatchParticipant myParticipant;
@@ -23,112 +27,145 @@ class LudoPlayerDicePanel extends StatelessWidget {
   final int? opponentDiceValue;
   final int myAnimateKey;
   final int opponentAnimateKey;
-  final bool canRollMine;
+  final LudoDiceVisualState myDiceState;
+  final LudoDiceVisualState opponentDiceState;
   final VoidCallback onRollMine;
-  final bool busy;
+  final bool preGame;
+  final String? headline;
+  final String? detail;
 
   @override
   Widget build(BuildContext context) {
     final myColor = myParticipant.color ?? LudoColor.red;
     final opponentColor = opponentParticipant.color ?? LudoColor.green;
+    final scheme = Theme.of(context).colorScheme;
 
-    return Row(
-      children: [
-        Expanded(
-          child: _DiceSide(
-            participant: myParticipant,
-            color: myColor,
-            diceValue: myDiceValue,
-            animateKey: myAnimateKey,
-            enabled: canRollMine && !busy,
-            onTap: onRollMine,
-            alignEnd: false,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Text(
-            'VS',
+    if (preGame) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'WHO STARTS?',
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: Theme.of(context).colorScheme.outline,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
+                  color: scheme.onSurfaceVariant,
                 ),
           ),
-        ),
-        Expanded(
-          child: _DiceSide(
-            participant: opponentParticipant,
-            color: opponentColor,
-            diceValue: opponentDiceValue,
-            animateKey: opponentAnimateKey,
-            enabled: false,
-            alignEnd: true,
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _LabeledDice(
+                label: opponentParticipant.displayLabel(myUserId: myParticipant.userId),
+                color: opponentColor,
+                value: opponentDiceValue,
+                animateKey: opponentAnimateKey,
+                state: opponentDiceState,
+              ),
+              const SizedBox(width: 28),
+              _LabeledDice(
+                label: 'You',
+                color: myColor,
+                value: myDiceValue,
+                animateKey: myAnimateKey,
+                state: myDiceState,
+                onTap: myDiceState == LudoDiceVisualState.ready ? onRollMine : null,
+              ),
+            ],
           ),
+          if (headline != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              headline!,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ],
+          if (detail != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              detail!,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+          ],
+        ],
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        LudoDice(
+          value: myDiceValue,
+          animateKey: myAnimateKey,
+          state: myDiceState,
+          onTap: myDiceState == LudoDiceVisualState.ready ? onRollMine : null,
+          accentColor: myColor,
+          size: 72,
+          showRollHint: myDiceState == LudoDiceVisualState.ready,
         ),
+        if (headline != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            headline!,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ],
+        if (detail != null) ...[
+          const SizedBox(height: 2),
+          Text(
+            detail!,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+        ],
       ],
     );
   }
 }
 
-class _DiceSide extends StatelessWidget {
-  const _DiceSide({
-    required this.participant,
+class _LabeledDice extends StatelessWidget {
+  const _LabeledDice({
+    required this.label,
     required this.color,
-    required this.diceValue,
+    required this.value,
     required this.animateKey,
-    required this.enabled,
-    required this.alignEnd,
+    required this.state,
     this.onTap,
   });
 
-  final LudoMatchParticipant participant;
+  final String label;
   final LudoColor color;
-  final int? diceValue;
+  final int? value;
   final int animateKey;
-  final bool enabled;
+  final LudoDiceVisualState state;
   final VoidCallback? onTap;
-  final bool alignEnd;
 
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: alignEnd ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(color: color.color, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                participant.fullName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
         Text(
-          color.name.toUpperCase(),
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color.color),
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
-        Align(
-          alignment: alignEnd ? Alignment.centerRight : Alignment.centerLeft,
-          child: LudoDice(
-            value: diceValue,
-            animateKey: animateKey,
-            enabled: enabled,
-            onTap: onTap,
-            accentColor: color,
-            label: enabled ? 'Tap to roll' : null,
-            compact: true,
-          ),
+        LudoDice(
+          value: value,
+          animateKey: animateKey,
+          state: state,
+          onTap: onTap,
+          accentColor: color,
+          size: 56,
+          showRollHint: state == LudoDiceVisualState.ready,
         ),
       ],
     );

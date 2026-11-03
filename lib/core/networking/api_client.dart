@@ -79,9 +79,9 @@ class ApiClient {
 
 final apiClientProvider = Provider<ApiClient>((ref) {
   final dio = Dio(BaseOptions(
-    baseUrl: AppConfig.development.apiBaseUrl,
-    connectTimeout: const Duration(seconds: 12),
-    receiveTimeout: const Duration(seconds: 20),
+    baseUrl: AppConfig.current.apiBaseUrl,
+    connectTimeout: const Duration(seconds: 45),
+    receiveTimeout: const Duration(seconds: 45),
     headers: {'Accept': 'application/json'},
   ));
   return ApiClient(dio, ref.watch(secureStorageProvider));

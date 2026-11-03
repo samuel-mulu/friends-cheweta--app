@@ -41,18 +41,29 @@ abstract final class LudoBoardGeometry {
     ],
   };
 
+  /// Logical cell key for stacking (base tokens use unique keys so yard layout stays clean).
+  static String occupancyKey({required LudoColor color, required int progress, required String tokenId}) {
+    if (progress < 0) return 'base-$tokenId';
+    if (progress <= 51) return 'track-${(color.startIndex + progress) % 52}';
+    if (progress <= 56) return 'home-${color.name}-$progress';
+    return 'finish-${color.name}';
+  }
+
   static Offset tokenCenter({
     required LudoColor color,
     required int progress,
     required int baseIndex,
     required double boardSize,
     int stackIndex = 0,
+    int stackCount = 1,
   }) {
     final cell = boardSize / gridSize;
     Offset center;
 
     if (progress < 0) {
       center = _baseCenter(color, baseIndex, cell);
+      // Yard uses designated pocket spots — no track stacking.
+      return center;
     } else if (progress <= 51) {
       final global = (color.startIndex + progress) % 52;
       final grid = track[global];
@@ -66,14 +77,33 @@ abstract final class LudoBoardGeometry {
       center = _finishCenter(color, cell);
     }
 
-    if (stackIndex <= 0) return center;
-    final direction = switch (stackIndex % 4) {
-      0 => const Offset(-1, -1),
-      1 => const Offset(1, -1),
-      2 => const Offset(-1, 1),
-      _ => const Offset(1, 1),
+    return center + stackOffset(stackIndex: stackIndex, stackCount: stackCount, cellSize: cell);
+  }
+
+  /// Distinct offsets for 2 / 3 / 4 tokens sharing a cell.
+  static Offset stackOffset({
+    required int stackIndex,
+    required int stackCount,
+    required double cellSize,
+  }) {
+    if (stackCount <= 1 || stackIndex < 0) return Offset.zero;
+    final o = cellSize * 0.18;
+    if (stackCount == 2) {
+      return stackIndex == 0 ? Offset(-o, -o * 0.25) : Offset(o, o * 0.25);
+    }
+    if (stackCount == 3) {
+      return switch (stackIndex.clamp(0, 2)) {
+        0 => Offset(0, -o * 0.95),
+        1 => Offset(-o, o * 0.55),
+        _ => Offset(o, o * 0.55),
+      };
+    }
+    return switch (stackIndex % 4) {
+      0 => Offset(-o, -o),
+      1 => Offset(o, -o),
+      2 => Offset(-o, o),
+      _ => Offset(o, o),
     };
-    return center + direction * (cell * .13);
   }
 
   static Offset _baseCenter(LudoColor color, int index, double cell) {
@@ -95,10 +125,10 @@ abstract final class LudoBoardGeometry {
 
   static Offset _finishCenter(LudoColor color, double cell) {
     final local = switch (color) {
-      LudoColor.red => const Offset(6.8, 7.5),
-      LudoColor.green => const Offset(7.5, 6.8),
-      LudoColor.yellow => const Offset(8.2, 7.5),
-      LudoColor.blue => const Offset(7.5, 8.2),
+      LudoColor.red => const Offset(6.75, 7.5),
+      LudoColor.green => const Offset(7.5, 6.75),
+      LudoColor.yellow => const Offset(8.25, 7.5),
+      LudoColor.blue => const Offset(7.5, 8.25),
     };
     return Offset(local.dx * cell, local.dy * cell);
   }
