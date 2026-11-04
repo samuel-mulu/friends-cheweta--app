@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
+import 'package:friends_game_app/features/ludo/domain/ludo_motion.dart';
 
-enum LudoPresentationKind { dice, move, capture, finish, turn, extraRoll, matchFinished }
+enum LudoPresentationKind { matchStarted, dice, move, capture, finish, turn, extraRoll, matchFinished }
 
 class LudoPresentationEvent {
   const LudoPresentationEvent({
@@ -54,16 +55,19 @@ class LudoAnimationQueueController extends Notifier<LudoAnimationState> {
     while (_queue.isNotEmpty) {
       final current = _queue.removeAt(0);
       state = LudoAnimationState(current: current, pendingCount: _queue.length, sequence: ++_sequence);
-      await Future<void>.delayed(_durationFor(current.kind));
+      await Future<void>.delayed(durationFor(current));
     }
     _draining = false;
     state = LudoAnimationState(sequence: ++_sequence);
   }
 
-  Duration _durationFor(LudoPresentationKind kind) => switch (kind) {
-        LudoPresentationKind.dice => const Duration(milliseconds: 650),
-        LudoPresentationKind.move => const Duration(milliseconds: 800),
-        LudoPresentationKind.capture => const Duration(milliseconds: 450),
+  /// How long each presented event holds the stage. Moves scale with the
+  /// number of cells walked so long and short moves both feel natural.
+  static Duration durationFor(LudoPresentationEvent event) => switch (event.kind) {
+        LudoPresentationKind.matchStarted => const Duration(milliseconds: 400),
+        LudoPresentationKind.dice => LudoMotion.diceRoll,
+        LudoPresentationKind.move => LudoMotion.moveDuration(event.move),
+        LudoPresentationKind.capture => LudoMotion.captureFlight,
         LudoPresentationKind.finish => const Duration(milliseconds: 450),
         LudoPresentationKind.turn => const Duration(milliseconds: 260),
         LudoPresentationKind.extraRoll => const Duration(milliseconds: 300),

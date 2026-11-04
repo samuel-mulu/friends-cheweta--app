@@ -1,22 +1,32 @@
-import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
+import 'package:friends_game_app/features/ludo/domain/ludo_motion.dart';
+import 'package:friends_game_app/features/ludo/domain/ludo_seats.dart';
+import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board_geometry.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board_painter.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_token.dart';
 
+/// The playfield. Renders server state only; [animatedMove] is the move the
+/// presentation queue is currently showing (walked cell by cell).
 class LudoBoard extends StatelessWidget {
   const LudoBoard({
     super.key,
     this.tokens = const [],
     this.animatedMove,
     this.animationSequence = 0,
+    this.orientation = LudoBoardOrientation.identity,
+    this.onStep,
   });
 
   final List<LudoBoardTokenView> tokens;
   final LudoMoveResolution? animatedMove;
   final int animationSequence;
+  final LudoBoardOrientation orientation;
+
+  /// Called each time the walking token lands on a cell (for step sounds).
+  final VoidCallback? onStep;
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +38,27 @@ class LudoBoard extends StatelessWidget {
           final size = constraints.maxWidth;
           final cell = size / LudoBoardGeometry.gridSize;
           final tokenSize = cell * 0.72;
+          final move = animatedMove;
+
+          Offset centerOf(LudoColor color, int progress, int baseIndex, {int stackIndex = 0, int stackCount = 1}) =>
+              orientation.rotate(
+                LudoBoardGeometry.tokenCenter(
+                  color: color,
+                  progress: progress,
+                  baseIndex: baseIndex,
+                  stackIndex: stackIndex,
+                  stackCount: stackCount,
+                  boardSize: size,
+                ),
+                size,
+              );
+
+          // While the attacker walks, captured tokens wait on the target cell;
+          // they fly home when the capture is presented.
+          final holdAt = move == null || move.capturedTokenIds.isEmpty
+              ? null
+              : centerOf(move.tokenAfter.color, move.tokenAfter.progress, 0);
+
           return DecoratedBox(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
@@ -44,25 +75,39 @@ class LudoBoard extends StatelessWidget {
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  // Static board — isolated so token/timer rebuilds skip this layer.
-                  const Positioned.fill(
+                  // Static board, isolated so token/timer rebuilds skip this layer.
+                  Positioned.fill(
                     child: RepaintBoundary(
-                      child: CustomPaint(painter: LudoBoardPainter()),
+                      child: RotatedBox(
+                        quarterTurns: orientation.quarterTurns,
+                        child: const CustomPaint(painter: LudoBoardPainter()),
+                      ),
                     ),
                   ),
                   for (final token in tokens)
-                    if (animatedMove?.tokenAfter.id != token.id)
-                      _PositionedToken(
+                    if (move?.tokenAfter.id != token.id)
+                      _PlacedToken(
+                        // Keys keep each token's element (and its implicit
+                        // animation) attached to the right token.
+                        key: ValueKey(token.id),
                         token: token,
-                        boardSize: size,
+                        center: holdAt != null && move!.capturedTokenIds.contains(token.id)
+                            ? holdAt
+                            : centerOf(token.color, token.progress, token.baseIndex,
+                                stackIndex: token.stackIndex, stackCount: token.stackCount),
                         tokenSize: tokenSize,
                       ),
-                  if (animatedMove != null)
-                    _MovingTokenOverlay(
+                  if (move != null)
+                    _WalkingToken(
                       key: ValueKey('move-$animationSequence'),
-                      move: animatedMove!,
-                      boardSize: size,
+                      move: move,
+                      cells: [
+                        for (final progress in LudoMotion.path(move))
+                          centerOf(move.tokenAfter.color, progress, _baseIndex(move.tokenAfter.id)),
+                      ],
                       tokenSize: tokenSize,
+                      lift: cell * 0.38,
+                      onStep: onStep,
                     ),
                 ],
               ),
@@ -72,30 +117,27 @@ class LudoBoard extends StatelessWidget {
       ),
     );
   }
+
+  static int _baseIndex(String tokenId) {
+    final value = int.tryParse(tokenId.split('-').last) ?? 1;
+    return (value - 1).clamp(0, 3).toInt();
+  }
 }
 
-class _PositionedToken extends StatelessWidget {
-  const _PositionedToken({
-    required this.token,
-    required this.boardSize,
-    required this.tokenSize,
-  });
+class _PlacedToken extends StatelessWidget {
+  const _PlacedToken({super.key, required this.token, required this.center, required this.tokenSize});
 
   final LudoBoardTokenView token;
-  final double boardSize;
+  final Offset center;
   final double tokenSize;
 
   @override
   Widget build(BuildContext context) {
-    final center = LudoBoardGeometry.tokenCenter(
-      color: token.color,
-      progress: token.progress,
-      baseIndex: token.baseIndex,
-      stackIndex: token.stackIndex,
-      stackCount: token.stackCount,
-      boardSize: boardSize,
-    );
-    return Positioned(
+    return AnimatedPositioned(
+      // Implicit motion for jumps that are not walked: capture flights home,
+      // stack re-arrangement and recovery snaps.
+      duration: LudoMotion.captureFlight,
+      curve: Curves.easeInOutCubic,
       left: center.dx - tokenSize / 2,
       top: center.dy - tokenSize / 2,
       width: tokenSize,
@@ -114,83 +156,89 @@ class _PositionedToken extends StatelessWidget {
   }
 }
 
-class _MovingTokenOverlay extends StatefulWidget {
-  const _MovingTokenOverlay({
+/// Walks a token along [cells], hopping once per cell.
+class _WalkingToken extends StatefulWidget {
+  const _WalkingToken({
     super.key,
     required this.move,
-    required this.boardSize,
+    required this.cells,
     required this.tokenSize,
+    required this.lift,
+    this.onStep,
   });
 
   final LudoMoveResolution move;
-  final double boardSize;
+  final List<Offset> cells;
   final double tokenSize;
+  final double lift;
+  final VoidCallback? onStep;
 
   @override
-  State<_MovingTokenOverlay> createState() => _MovingTokenOverlayState();
+  State<_WalkingToken> createState() => _WalkingTokenState();
 }
 
-class _MovingTokenOverlayState extends State<_MovingTokenOverlay> {
-  late int _progress;
-  Timer? _timer;
+class _WalkingTokenState extends State<_WalkingToken> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  int _landed = 0;
+
+  int get _hops => widget.cells.length - 1;
 
   @override
   void initState() {
     super.initState();
-    _progress = widget.move.tokenBefore.progress;
-    _start();
+    _controller = AnimationController(vsync: this, duration: LudoMotion.stepDuration * math.max(_hops, 1))
+      ..addListener(_reportLandings)
+      ..forward();
   }
 
-  void _start() {
-    final target = widget.move.tokenAfter.progress;
-    if (_progress == target) return;
-    _timer = Timer.periodic(const Duration(milliseconds: 105), (timer) {
-      if (!mounted) return;
-      if (_progress < 0) {
-        setState(() => _progress = 0);
-      } else if (_progress < target) {
-        setState(() => _progress += 1);
-      }
-      if (_progress >= target) timer.cancel();
-    });
+  void _reportLandings() {
+    final landed = (_controller.value * _hops).floor();
+    while (_landed < landed) {
+      _landed++;
+      widget.onStep?.call();
+    }
+    if (_controller.isCompleted && _landed < _hops) {
+      _landed = _hops;
+      widget.onStep?.call();
+    }
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final token = widget.move.tokenAfter;
-    final center = LudoBoardGeometry.tokenCenter(
-      color: token.color,
-      progress: _progress,
-      baseIndex: _baseIndex(token.id),
-      boardSize: widget.boardSize,
-    );
-    return AnimatedPositioned(
-      duration: const Duration(milliseconds: 95),
-      curve: Curves.easeOut,
-      left: center.dx - widget.tokenSize / 2,
-      top: center.dy - widget.tokenSize / 2,
-      width: widget.tokenSize,
-      height: widget.tokenSize,
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final cells = widget.cells;
+        final t = _controller.value * _hops;
+        final index = t.floor().clamp(0, math.max(_hops - 1, 0)).toInt();
+        final f = _hops == 0 ? 1.0 : (t - index).clamp(0.0, 1.0);
+        final from = cells[index];
+        final to = cells[math.min(index + 1, cells.length - 1)];
+        final arc = math.sin(math.pi * f);
+        final center = Offset.lerp(from, to, Curves.easeInOut.transform(f))! - Offset(0, widget.lift * arc);
+        return Positioned(
+          left: center.dx - widget.tokenSize / 2,
+          top: center.dy - widget.tokenSize / 2,
+          width: widget.tokenSize,
+          height: widget.tokenSize,
+          child: Transform.scale(scale: 1 + 0.14 * arc, child: child),
+        );
+      },
       child: IgnorePointer(
         child: LudoTokenPiece(
           color: token.color,
           size: widget.tokenSize,
-          baseIndex: _baseIndex(token.id),
+          baseIndex: LudoBoard._baseIndex(token.id),
           finished: token.state == LudoTokenState.finished,
         ),
       ),
     );
-  }
-
-  int _baseIndex(String tokenId) {
-    final part = tokenId.split('-').last;
-    final value = int.tryParse(part) ?? 1;
-    return (value - 1).clamp(0, 3).toInt();
   }
 }

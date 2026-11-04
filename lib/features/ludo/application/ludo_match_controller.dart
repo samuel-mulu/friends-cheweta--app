@@ -135,15 +135,17 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
     }
   }
 
-  Future<void> rollForStart() => _command('ludo:roll_for_start');
-  Future<void> roll() => _command('ludo:roll');
-  Future<void> resign() => _command('ludo:resign');
-  Future<void> move(String tokenId) => _command('ludo:move', tokenId: tokenId);
+  /// Commands resolve to true when the server accepted them. State itself only
+  /// changes from server events; the result lets the UI end optimistic effects.
+  Future<bool> rollForStart() => _command('ludo:roll_for_start');
+  Future<bool> roll() => _command('ludo:roll');
+  Future<bool> resign() => _command('ludo:resign');
+  Future<bool> move(String tokenId) => _command('ludo:move', tokenId: tokenId);
 
-  Future<void> _command(String eventName, {String? tokenId}) async {
+  Future<bool> _command(String eventName, {String? tokenId}) async {
     final snapshot = state.snapshot;
     final matchId = state.matchId;
-    if (snapshot == null || matchId == null || state.pendingCommandId != null) return;
+    if (snapshot == null || matchId == null || state.pendingCommandId != null) return false;
     final commandId = _uuid.v4();
     state = state.copyWith(pendingCommandId: commandId, clearError: true);
     final payload = <String, dynamic>{
@@ -160,12 +162,14 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
       }
       if (ack['ok'] == true) {
         state = state.copyWith(clearPending: true);
-        return; // ACK means accepted/deduped. State changes only from server EVENT.
+        return true; // ACK means accepted/deduped. State changes only from server EVENT.
       }
       state = state.copyWith(clearPending: true, error: _ackMessage(ack));
       if (ack['code'] == 'MATCH_VERSION_CONFLICT') unawaited(recover(reason: 'version_conflict'));
+      return false;
     } catch (_) {
       state = state.copyWith(clearPending: true, error: 'The command could not be sent. Reconnect and try again.');
+      return false;
     }
   }
 
@@ -380,6 +384,9 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
         break;
       case 'ludo:token_finished':
         queue.enqueue(LudoPresentationEvent(kind: LudoPresentationKind.finish, playerId: data['playerId']?.toString(), tokenId: data['tokenId']?.toString()));
+        break;
+      case 'match:started':
+        queue.enqueue(LudoPresentationEvent(kind: LudoPresentationKind.matchStarted, playerId: data['playerId']?.toString()));
         break;
       case 'ludo:turn_started':
         queue.enqueue(LudoPresentationEvent(kind: LudoPresentationKind.turn, playerId: data['playerId']?.toString()));

@@ -2,7 +2,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
 
-/// Visual die with pip faces. Final face always equals the server-provided [value].
+/// Visual die with pip faces. The face it settles on is always the
+/// server-provided [value]; spinning before that is presentation only.
 class LudoDice extends StatefulWidget {
   const LudoDice({
     super.key,
@@ -13,13 +14,19 @@ class LudoDice extends StatefulWidget {
     this.accentColor,
     this.size = 64,
     this.showRollHint = true,
+    this.spinning = false,
   });
 
   /// Authoritative face from the server (or null before any roll).
   final int? value;
 
-  /// Bumps when a new server dice presentation should animate.
+  /// Increases when a new server roll for this die's owner is presented.
+  /// Only an increase animates, so other players' rolls never move this die.
   final int animateKey;
+
+  /// True from the owner's tap until the server result is presented: the die
+  /// spins at once instead of waiting for the network round trip.
+  final bool spinning;
 
   final LudoDiceVisualState state;
   final VoidCallback? onTap;
@@ -32,10 +39,14 @@ class LudoDice extends StatefulWidget {
 }
 
 class _LudoDiceState extends State<LudoDice> with TickerProviderStateMixin {
+  static const _flipEvery = Duration(milliseconds: 70);
+
   late final AnimationController _pulse;
   late final AnimationController _roll;
   int _shown = 1;
   bool _rolling = false;
+  int? _settleTo;
+  DateTime _lastFlip = DateTime.fromMillisecondsSinceEpoch(0);
   final _rng = math.Random();
 
   @override
@@ -46,6 +57,7 @@ class _LudoDiceState extends State<LudoDice> with TickerProviderStateMixin {
     _roll = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
     _roll.addListener(_onRollTick);
     _syncPulse();
+    if (widget.spinning) _spin();
   }
 
   @override
@@ -53,21 +65,19 @@ class _LudoDiceState extends State<LudoDice> with TickerProviderStateMixin {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.state != widget.state) _syncPulse();
 
-    if (oldWidget.animateKey != widget.animateKey && widget.value != null) {
-      _animateToServerValue(widget.value!);
-      return;
-    }
-
-    if (widget.value == null) {
+    if (widget.animateKey > oldWidget.animateKey && widget.value != null) {
+      _settle(widget.value!);
+    } else if (widget.spinning && !oldWidget.spinning) {
+      _spin();
+    } else if (!widget.spinning && oldWidget.spinning && _settleTo == null) {
+      // The roll was rejected or failed: stop and keep the last real face.
+      _roll.stop();
       setState(() {
-        _shown = 1;
         _rolling = false;
+        _shown = (widget.value ?? 1).clamp(1, 6);
       });
-    } else if (oldWidget.value != widget.value && oldWidget.animateKey == widget.animateKey) {
-      setState(() {
-        _shown = widget.value!.clamp(1, 6);
-        _rolling = false;
-      });
+    } else if (!_rolling && widget.value != oldWidget.value) {
+      setState(() => _shown = (widget.value ?? 1).clamp(1, 6));
     }
   }
 
@@ -80,16 +90,23 @@ class _LudoDiceState extends State<LudoDice> with TickerProviderStateMixin {
     }
   }
 
-  void _animateToServerValue(int target) {
-    final clamped = target.clamp(1, 6);
+  void _spin() {
     _rolling = true;
-    _roll.stop();
+    _settleTo = null;
+    _roll.repeat();
+  }
+
+  void _settle(int target) {
+    _rolling = true;
+    _settleTo = target.clamp(1, 6);
     _roll
+      ..stop()
       ..reset()
       ..forward().whenComplete(() {
         if (!mounted) return;
         setState(() {
-          _shown = clamped;
+          _shown = _settleTo ?? _shown;
+          _settleTo = null;
           _rolling = false;
         });
       });
@@ -97,12 +114,15 @@ class _LudoDiceState extends State<LudoDice> with TickerProviderStateMixin {
 
   void _onRollTick() {
     if (!_rolling || !mounted) return;
-    // Presentation-only flicker; final face is forced to server value on complete.
-    if (_roll.value < 0.85) {
-      setState(() => _shown = _rng.nextInt(6) + 1);
-    } else if (widget.value != null) {
-      setState(() => _shown = widget.value!.clamp(1, 6));
+    final settleTo = _settleTo;
+    if (settleTo != null && _roll.value >= 0.8) {
+      if (_shown != settleTo) setState(() => _shown = settleTo);
+      return;
     }
+    final now = DateTime.now();
+    if (now.difference(_lastFlip) < _flipEvery) return;
+    _lastFlip = now;
+    setState(() => _shown = _rng.nextInt(6) + 1);
   }
 
   @override

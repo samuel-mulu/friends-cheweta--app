@@ -19,6 +19,12 @@ class FakeSocket extends Fake implements GameSocketService {
   @override
   Stream<GameSocketStatus> get statuses => statuses$.stream;
   @override
+  GameSocketStatus get status => GameSocketStatus.connected;
+  @override
+  bool get isConnected => true;
+  @override
+  DateTime serverNow() => DateTime.now().toUtc();
+  @override
   Future<Map<String, dynamic>> emitWithAck(String event, [Map<String, dynamic> payload = const {}]) async {
     sent.add(event);
     return reply(event, payload);
