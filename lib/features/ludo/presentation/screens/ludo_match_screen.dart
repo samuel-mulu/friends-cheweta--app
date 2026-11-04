@@ -18,6 +18,7 @@ import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board_geometry.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_seat.dart';
+import 'package:friends_game_app/features/profile/presentation/controllers/preferences_controller.dart';
 
 /// In-match screen. Layout works for 2, 3 or 4 players: the board is rotated
 /// so the viewer's color sits bottom-left, and every player has a corner seat
@@ -97,6 +98,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       },
     );
     if (feedback.sound != null) ref.read(gameSoundServiceProvider).play(feedback.sound!, volume: feedback.volume);
+    if (!ref.read(playerPreferencesProvider).hapticsEnabled) return;
     switch (feedback.haptic) {
       case LudoHaptic.light:
         HapticFeedback.lightImpact();
@@ -109,8 +111,18 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     }
   }
 
+  void _tick() {
+    if (ref.read(playerPreferencesProvider).hapticsEnabled) HapticFeedback.selectionClick();
+  }
+
+  void _moveToken(String tokenId) {
+    _tick();
+    setState(() => _pendingTokenId = tokenId);
+    ref.read(ludoMatchControllerProvider.notifier).move(tokenId);
+  }
+
   Future<void> _rollMine({required bool startRoll}) async {
-    HapticFeedback.selectionClick();
+    _tick();
     setState(() => _mySpin = true);
     final controller = ref.read(ludoMatchControllerProvider.notifier);
     final ok = startRoll ? await controller.rollForStart() : await controller.roll();
@@ -120,12 +132,32 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
   @override
   Widget build(BuildContext context) {
     ref.listen(ludoAnimationQueueProvider, _onPresentation);
+    ref.listen(ludoMatchControllerProvider.select((s) => s.autoPlayNotice), (previous, next) {
+      if (next == null || next.seq == previous?.seq) return;
+      final me = ref.read(authControllerProvider).user?.id;
+      final left = next.maxStrikes - next.strikes;
+      final name = ref
+              .read(ludoMatchControllerProvider)
+              .participants
+              .where((p) => p.userId == next.playerId)
+              .firstOrNull
+              ?.displayLabel() ??
+          'Opponent';
+      final text = next.playerId == me
+          ? 'Time ran out, so we played for you (${next.strikes}/${next.maxStrikes}).'
+              '${left > 0 ? ' $left more and you forfeit.' : ''}'
+          : '$name is away, auto-played (${next.strikes}/${next.maxStrikes}).';
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 3)));
+    });
     final match = ref.watch(ludoMatchControllerProvider);
     final me = ref.watch(authControllerProvider.select((auth) => auth.user?.id));
     final socket = ref.watch(gameSocketStatusProvider);
     final animation = ref.watch(ludoAnimationQueueProvider);
     final chat = ref.watch(matchChatControllerProvider);
-    final soundOn = ref.watch(gameSoundEnabledProvider);
+    final prefs = ref.watch(playerPreferencesProvider);
+    final soundOn = prefs.soundEnabled;
     final snapshot = match.snapshot;
 
     // Clear local pending token when command settles.
@@ -210,7 +242,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                     recovering: match.recovering,
                     onExit: () => _confirmExit(context, game),
                     onChat: () => _openChat(context),
-                    onToggleSound: () => ref.read(gameSoundEnabledProvider.notifier).toggle(),
+                    onToggleSound: () => ref.read(playerPreferencesProvider.notifier).setSound(!soundOn),
                     onMenu: () => _openMenu(context, match),
                   ),
                   Expanded(
@@ -231,6 +263,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                                     animation.current?.kind == LudoPresentationKind.move ? animation.current?.move : null,
                                 animationSequence: animation.sequence,
                                 onStep: () => ref.read(gameSoundServiceProvider).play(GameSound.step, volume: 0.5),
+                                ghosts: _ghosts(match, game, me, myColor, actionsAllowed && !presenting),
                               ),
                             ),
                           ),
@@ -341,8 +374,33 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       rank: rankIndex >= 0 && game.players.length > 2 ? rankIndex + 1 : (rankIndex == 0 ? 1 : null),
       resigned: resigned,
       recentRolls: _rollHistory[userId] ?? const [],
+      strikes: match.strikes[userId] ?? 0,
+      maxStrikes: match.maxStrikes,
       onRoll: canStartRoll || canRoll ? () => _rollMine(startRoll: canStartRoll) : null,
     );
+  }
+
+  /// Landing previews while it is my move (the server computed them).
+  List<LudoGhostView> _ghosts(LudoMatchViewState match, LudoGameState game, String? me, LudoColor? myColor, bool canAct) {
+    if (!canAct ||
+        myColor == null ||
+        _pendingTokenId != null ||
+        game.currentPlayerId != me ||
+        game.turnPhase != LudoTurnPhase.waitingForMove) {
+      return const [];
+    }
+    return [
+      for (final preview in match.legalMoves)
+        if (game.legalTokenIds.contains(preview.tokenId))
+          LudoGhostView(
+            tokenId: preview.tokenId,
+            color: myColor,
+            toProgress: preview.toProgress,
+            captures: preview.captures.isNotEmpty,
+            safe: preview.safe,
+            onTap: () => _moveToken(preview.tokenId),
+          ),
+    ];
   }
 
   List<LudoBoardTokenView> _buildTokens({
@@ -394,11 +452,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
             stackIndex: stackIndexByToken[item.token.id] ?? 0,
             stackCount: stackCountByToken[item.token.id] ?? 1,
             onTap: selectable
-                ? () {
-                    HapticFeedback.selectionClick();
-                    setState(() => _pendingTokenId = item.token.id);
-                    ref.read(ludoMatchControllerProvider.notifier).move(item.token.id);
-                  }
+                ? () => _moveToken(item.token.id)
                 : null,
           );
         }(),
@@ -517,6 +571,14 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                   _confirmResign(context);
                 },
               ),
+            Consumer(
+              builder: (context, ref, _) => SwitchListTile(
+                secondary: const Icon(Icons.speed_rounded),
+                title: const Text('Fast animations'),
+                value: ref.watch(playerPreferencesProvider.select((p) => p.fastAnimations)),
+                onChanged: (value) => ref.read(playerPreferencesProvider.notifier).setFastAnimations(value),
+              ),
+            ),
             ListTile(leading: const Icon(Icons.close_rounded), title: const Text('Close'), onTap: () => Navigator.pop(context)),
           ],
         ),

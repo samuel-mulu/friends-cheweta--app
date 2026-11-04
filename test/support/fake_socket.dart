@@ -30,7 +30,21 @@ class FakeSocket extends Fake implements GameSocketService {
     return reply(event, payload);
   }
 
-  void push(String name, Map<String, dynamic> data) => events$.add(RealtimeEvent(name: name, payload: {'data': data}));
+  @override
+  Future<void> connect() async {}
+
+  var _eventSeq = 0;
+
+  /// Push a server event. [matchId]/[version] go in the envelope like the server's.
+  void push(String name, Map<String, dynamic> data, {String? matchId, int? version}) => events$.add(RealtimeEvent(
+        name: name,
+        payload: {
+          'eventId': 'evt-${++_eventSeq}',
+          if (matchId != null) 'matchId': matchId,
+          if (version != null) 'version': version,
+          'data': data,
+        },
+      ));
 }
 
 class SignedInAs extends AuthController {

@@ -24,6 +24,8 @@ class LudoSeatView {
     this.rank,
     this.resigned = false,
     this.recentRolls = const [],
+    this.strikes = 0,
+    this.maxStrikes = 3,
     this.onRoll,
   });
 
@@ -45,6 +47,10 @@ class LudoSeatView {
 
   /// Most recent rolls first (max 3), shown as small faces under the dice.
   final List<int> recentRolls;
+
+  /// Consecutive turn timeouts ("away strikes"); forfeit at [maxStrikes].
+  final int strikes;
+  final int maxStrikes;
   final VoidCallback? onRoll;
 
   LudoColor get color => participant.color ?? LudoColor.red;
@@ -82,6 +88,25 @@ class LudoSeat extends StatelessWidget {
             ),
           ),
         ),
+        if (seat.strikes > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < seat.maxStrikes; i++)
+                  Container(
+                    width: 7,
+                    height: 7,
+                    margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: i < seat.strikes ? const Color(0xFFFF6B6B) : Colors.white.withValues(alpha: 0.25),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         SizedBox(
           height: 16,
           child: seat.active && seat.turnEndsAt != null

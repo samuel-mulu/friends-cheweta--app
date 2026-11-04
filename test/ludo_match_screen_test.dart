@@ -13,12 +13,15 @@ import 'support/fake_socket.dart';
 
 const _colors = ['RED', 'GREEN', 'YELLOW', 'BLUE'];
 
-LudoRuntimeSnapshot _snapshot(List<String> playerIds) => LudoRuntimeSnapshot.fromJson({
+LudoRuntimeSnapshot _snapshot(List<String> playerIds, {String turnPhase = 'WAITING_FOR_ROLL', List<String> legal = const []}) =>
+    LudoRuntimeSnapshot.fromJson({
       'game': {
         'matchId': 'm1',
         'version': 5,
         'phase': 'PLAYING',
-        'turnPhase': 'WAITING_FOR_ROLL',
+        'turnPhase': turnPhase,
+        'diceValue': legal.isEmpty ? null : 6,
+        'legalTokenIds': legal,
         'currentPlayerId': 'me',
         'players': [
           for (final (i, id) in playerIds.indexed)
@@ -43,8 +46,10 @@ LudoRuntimeSnapshot _snapshot(List<String> playerIds) => LudoRuntimeSnapshot.fro
     });
 
 class _FixedMatch extends LudoMatchController {
-  _FixedMatch(this.snapshot);
+  _FixedMatch(this.snapshot, {this.legalMoves = const [], this.strikes = const {}});
   final LudoRuntimeSnapshot snapshot;
+  final List<LudoMovePreview> legalMoves;
+  final Map<String, int> strikes;
 
   @override
   LudoMatchViewState build() {
@@ -56,6 +61,8 @@ class _FixedMatch extends LudoMatchController {
         for (final (i, p) in snapshot.game.players.indexed)
           LudoMatchParticipant(userId: p.userId, fullName: 'Player ${p.userId}', seat: i, color: p.color),
       ],
+      legalMoves: legalMoves,
+      strikes: strikes,
     );
   }
 
@@ -68,7 +75,7 @@ class _QuietChat extends MatchChatController {
   Future<void> load(String matchId) async {}
 }
 
-Future<void> _pump(WidgetTester tester, List<String> players) async {
+Future<void> _pump(WidgetTester tester, List<String> players, {LudoMatchController Function()? match}) async {
   tester.view.physicalSize = const Size(360, 740);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -77,7 +84,7 @@ Future<void> _pump(WidgetTester tester, List<String> players) async {
     overrides: [
       gameSocketServiceProvider.overrideWithValue(socket),
       authControllerProvider.overrideWith(SignedInAs.new),
-      ludoMatchControllerProvider.overrideWith(() => _FixedMatch(_snapshot(players))),
+      ludoMatchControllerProvider.overrideWith(match ?? () => _FixedMatch(_snapshot(players))),
       matchChatControllerProvider.overrideWith(_QuietChat.new),
       gameSoundServiceProvider.overrideWithValue(GameSoundService(null)),
     ],
@@ -106,5 +113,29 @@ void main() {
     await _pump(tester, ['me', 'p2', 'p3', 'p4']);
     expect(tester.takeException(), isNull);
     expect(find.byType(LudoSeat), findsNWidgets(4));
+  });
+
+  testWidgets('on my move, landing previews show where each token would go (capture marked)', (tester) async {
+    await _pump(
+      tester,
+      ['me', 'p2'],
+      match: () => _FixedMatch(
+        _snapshot(['me', 'p2'], turnPhase: 'WAITING_FOR_MOVE', legal: ['RED-1', 'RED-2']),
+        legalMoves: const [
+          LudoMovePreview(tokenId: 'RED-1', toProgress: 0, captures: [], safe: true),
+          LudoMovePreview(tokenId: 'RED-2', toProgress: 0, captures: ['YELLOW-1'], safe: false),
+        ],
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    expect(find.bySemanticsLabel('Move RED-1 here, safe square'), findsOneWidget);
+    expect(find.bySemanticsLabel('Move RED-2 here, captures'), findsOneWidget);
+    expect(find.text('Tap a glowing token to move'), findsOneWidget);
+  });
+
+  testWidgets('away strikes appear as dots on the seat', (tester) async {
+    await _pump(tester, ['me', 'p2'], match: () => _FixedMatch(_snapshot(['me', 'p2']), strikes: const {'p2': 2}));
+    final seats = tester.widgetList<LudoSeat>(find.byType(LudoSeat));
+    expect(seats.firstWhere((s) => !s.seat.isMe).seat.strikes, 2);
   });
 }

@@ -18,12 +18,16 @@ class LudoBoard extends StatelessWidget {
     this.animationSequence = 0,
     this.orientation = LudoBoardOrientation.identity,
     this.onStep,
+    this.ghosts = const [],
   });
 
   final List<LudoBoardTokenView> tokens;
   final LudoMoveResolution? animatedMove;
   final int animationSequence;
   final LudoBoardOrientation orientation;
+
+  /// Landing previews for the player's legal moves.
+  final List<LudoGhostView> ghosts;
 
   /// Called each time the walking token lands on a cell (for step sounds).
   final VoidCallback? onStep;
@@ -87,6 +91,13 @@ class LudoBoard extends StatelessWidget {
                     ),
                   ),
                 ),
+                for (final ghost in ghosts)
+                  _Ghost(
+                    key: ValueKey('ghost-${ghost.tokenId}'),
+                    ghost: ghost,
+                    center: centerOf(ghost.color, ghost.toProgress, 0),
+                    tokenSize: tokenSize,
+                  ),
                 for (final token in tokens)
                   if (move?.tokenAfter.id != token.id)
                     _PlacedToken(
@@ -126,6 +137,59 @@ class LudoBoard extends StatelessWidget {
   static int _baseIndex(String tokenId) {
     final value = int.tryParse(tokenId.split('-').last) ?? 1;
     return (value - 1).clamp(0, 3).toInt();
+  }
+}
+
+/// Faint pin where a legal token would land, with a ⚔ (capture) or ★ (safe)
+/// badge. Tapping it moves that token, like tapping the token itself.
+class _Ghost extends StatelessWidget {
+  const _Ghost({super.key, required this.ghost, required this.center, required this.tokenSize});
+  final LudoGhostView ghost;
+  final Offset center;
+  final double tokenSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final badge = ghost.captures ? '⚔' : (ghost.safe ? '★' : null);
+    return Positioned(
+      left: center.dx - tokenSize / 2,
+      top: center.dy - tokenSize * LudoBoard.pinAnchor,
+      width: tokenSize,
+      height: tokenSize,
+      child: Semantics(
+        button: ghost.onTap != null,
+        label: 'Move ${ghost.tokenId} here${ghost.captures ? ', captures' : ''}${ghost.safe ? ', safe square' : ''}',
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: ghost.onTap,
+          // The visuals are decorative; the label above says what tapping does.
+          child: ExcludeSemantics(
+              child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Opacity(
+                opacity: 0.42,
+                child: IgnorePointer(child: LudoTokenPiece(color: ghost.color, size: tokenSize, baseIndex: 0)),
+              ),
+              if (badge != null)
+                Positioned(
+                  right: -tokenSize * 0.1,
+                  top: -tokenSize * 0.05,
+                  child: Container(
+                    padding: EdgeInsets.all(tokenSize * 0.05),
+                    decoration: BoxDecoration(
+                      color: ghost.captures ? const Color(0xFFE53935) : const Color(0xFFFFC83D),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.2),
+                    ),
+                    child: Text(badge, style: TextStyle(fontSize: tokenSize * 0.28, color: Colors.white, height: 1)),
+                  ),
+                ),
+            ],
+          )),
+        ),
+      ),
+    );
   }
 }
 

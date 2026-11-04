@@ -62,3 +62,15 @@ class LudoBoardTokenView {
 
   bool get isSelectable => onTap != null && highlighted;
 }
+
+/// Where a legal token would land: drawn as a faint pin on the board.
+class LudoGhostView {
+  const LudoGhostView({required this.tokenId, required this.color, required this.toProgress, this.captures = false, this.safe = false, this.onTap});
+
+  final String tokenId;
+  final LudoColor color;
+  final int toProgress;
+  final bool captures;
+  final bool safe;
+  final VoidCallback? onTap;
+}

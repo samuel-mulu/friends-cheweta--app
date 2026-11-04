@@ -333,3 +333,36 @@ class LudoMoveResolution {
         capturedTokenIds: (json['capturedTokenIds'] as List? ?? const []).map((e) => e.toString()).toList(growable: false),
       );
 }
+
+/// Server-computed landing preview for one legal token (rules stay server-side).
+class LudoMovePreview {
+  const LudoMovePreview({required this.tokenId, required this.toProgress, required this.captures, required this.safe});
+
+  final String tokenId;
+  final int toProgress;
+  final List<String> captures;
+  final bool safe;
+
+  static List<LudoMovePreview> listFrom(Object? raw) => raw is List
+      ? raw
+          .whereType<Map>()
+          .map((item) => LudoMovePreview(
+                tokenId: item['tokenId']?.toString() ?? '',
+                toProgress: int.tryParse(item['toProgress']?.toString() ?? '') ?? 0,
+                captures: (item['captures'] as List? ?? const []).map((e) => e.toString()).toList(growable: false),
+                safe: item['safe'] == true,
+              ))
+          .toList(growable: false)
+      : const [];
+}
+
+/// "The server played for X" notice (turn timer ran out).
+class LudoAutoPlayNotice {
+  const LudoAutoPlayNotice({required this.playerId, required this.strikes, required this.maxStrikes, required this.seq});
+  final String playerId;
+  final int strikes;
+  final int maxStrikes;
+
+  /// Distinguishes two identical notices in a row.
+  final int seq;
+}

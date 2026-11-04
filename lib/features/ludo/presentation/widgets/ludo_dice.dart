@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:friends_game_app/features/ludo/domain/ludo_motion.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
 
 /// Visual die with pip faces. The face it settles on is always the
@@ -97,6 +98,8 @@ class _LudoDiceState extends State<LudoDice> with TickerProviderStateMixin {
   }
 
   void _settle(int target) {
+    // Finish just inside the queue's dice slot so the face lands before the next event.
+    _roll.duration = LudoMotion.diceRoll - const Duration(milliseconds: 30);
     _rolling = true;
     _settleTo = target.clamp(1, 6);
     _roll

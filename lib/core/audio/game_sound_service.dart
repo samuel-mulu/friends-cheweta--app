@@ -30,15 +30,12 @@ enum GameSound {
 class GameSoundService {
   GameSoundService(this._preferences);
 
-  static const _enabledKey = 'game_sound_enabled';
+  /// Same key as the Profile "Game sounds" switch (PreferencesController.soundKey).
+  static const _enabledKey = 'sound_enabled';
   final PreferencesStorage? _preferences;
   final Map<GameSound, Future<AudioPool?>> _pools = {};
 
   bool get enabled => _preferences?.getBool(_enabledKey) ?? true;
-
-  Future<void> setEnabled(bool value) async {
-    await _preferences?.setBool(_enabledKey, value);
-  }
 
   /// Warm the pools so the first roll is not delayed by asset loading.
   void preload() {
@@ -87,17 +84,3 @@ final gameSoundServiceProvider = Provider<GameSoundService>((ref) {
   ref.onDispose(() => unawaited(service.dispose()));
   return service;
 });
-
-/// UI-facing on/off switch, persisted.
-class GameSoundEnabled extends Notifier<bool> {
-  @override
-  bool build() => ref.watch(gameSoundServiceProvider).enabled;
-
-  Future<void> toggle() async {
-    final next = !state;
-    await ref.read(gameSoundServiceProvider).setEnabled(next);
-    state = next;
-  }
-}
-
-final gameSoundEnabledProvider = NotifierProvider<GameSoundEnabled, bool>(GameSoundEnabled.new);

@@ -22,6 +22,10 @@ class LudoMatchViewState {
     this.turnDurationSeconds = 30,
     this.cancelledReason,
     this.sessionCode,
+    this.legalMoves = const [],
+    this.strikes = const {},
+    this.maxStrikes = 3,
+    this.autoPlayNotice,
   });
 
   final String? matchId;
@@ -36,6 +40,14 @@ class LudoMatchViewState {
   final int turnDurationSeconds;
   final String? cancelledReason;
   final String? sessionCode;
+
+  /// Landing preview for the current move choice (cleared when the turn moves on).
+  final List<LudoMovePreview> legalMoves;
+
+  /// Consecutive timeouts per player ("away strikes"); forfeit at [maxStrikes].
+  final Map<String, int> strikes;
+  final int maxStrikes;
+  final LudoAutoPlayNotice? autoPlayNotice;
 
   int get version => snapshot?.game.version ?? -1;
   bool get ready => snapshot != null;
@@ -55,6 +67,10 @@ class LudoMatchViewState {
     int? turnDurationSeconds,
     String? cancelledReason,
     String? sessionCode,
+    List<LudoMovePreview>? legalMoves,
+    Map<String, int>? strikes,
+    int? maxStrikes,
+    LudoAutoPlayNotice? autoPlayNotice,
   }) =>
       LudoMatchViewState(
         matchId: matchId ?? this.matchId,
@@ -69,6 +85,10 @@ class LudoMatchViewState {
         turnDurationSeconds: turnDurationSeconds ?? this.turnDurationSeconds,
         cancelledReason: cancelledReason ?? this.cancelledReason,
         sessionCode: sessionCode ?? this.sessionCode,
+        legalMoves: legalMoves ?? this.legalMoves,
+        strikes: strikes ?? this.strikes,
+        maxStrikes: maxStrikes ?? this.maxStrikes,
+        autoPlayNotice: autoPlayNotice ?? this.autoPlayNotice,
       );
 }
 
@@ -77,6 +97,16 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
   StreamSubscription<GameSocketStatus>? _socketSub;
   int? _openEventVersion;
   final Set<String> _seenEventIds = <String>{};
+
+  /// Events after which the previous landing preview no longer applies.
+  static const _clearsPreview = {
+    'ludo:dice_rolled',
+    'ludo:token_moved',
+    'ludo:turn_started',
+    'ludo:extra_roll_granted',
+    'ludo:no_legal_move',
+    'match:finished',
+  };
   final Uuid _uuid = const Uuid();
 
   @override
@@ -190,6 +220,22 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
     }
     if (event.eventId != null && !_seenEventIds.add(event.eventId!)) return;
 
+    // Away strikes are not game-state versions; apply them directly.
+    if (event.name == 'ludo:auto_played' || event.name == 'ludo:strikes') {
+      final playerId = event.data['playerId']?.toString();
+      if (playerId == null) return;
+      final strikes = int.tryParse(event.data['strikes']?.toString() ?? '') ?? 0;
+      final max = int.tryParse(event.data['maxStrikes']?.toString() ?? '') ?? state.maxStrikes;
+      state = state.copyWith(
+        strikes: {...state.strikes, playerId: strikes},
+        maxStrikes: max,
+        autoPlayNotice: event.name == 'ludo:auto_played'
+            ? LudoAutoPlayNotice(playerId: playerId, strikes: strikes, maxStrikes: max, seq: (state.autoPlayNotice?.seq ?? 0) + 1)
+            : null,
+      );
+      return;
+    }
+
     final incoming = event.version;
     if (incoming == null) return;
     final current = snapshot.game.version;
@@ -212,7 +258,18 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
         lastDice = {...lastDice, rollerId: rolled};
       }
     }
-    state = state.copyWith(snapshot: updated, timing: timing, lastDiceByPlayer: lastDice, clearPending: true, clearError: true);
+    state = state.copyWith(
+      snapshot: updated,
+      timing: timing,
+      lastDiceByPlayer: lastDice,
+      clearPending: true,
+      clearError: true,
+      legalMoves: event.name == 'ludo:legal_moves_ready'
+          ? LudoMovePreview.listFrom(event.data['legalMoves'])
+          : _clearsPreview.contains(event.name)
+              ? const []
+              : null,
+    );
     _enqueuePresentation(event);
   }
 
@@ -425,6 +482,9 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
       loading: false,
       recovering: recovering,
       turnDurationSeconds: state.turnDurationSeconds,
+      legalMoves: LudoMovePreview.listFrom(ack['legalMoves']),
+      strikes: timing.consecutiveTimeoutsByPlayer,
+      maxStrikes: state.maxStrikes,
     );
   }
 
