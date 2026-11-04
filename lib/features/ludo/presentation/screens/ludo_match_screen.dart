@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/core/audio/game_sound_service.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
+import 'package:friends_game_app/core/theme/app_theme.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/chat/application/match_chat_controller.dart';
 import 'package:friends_game_app/features/chat/domain/chat_message.dart';
@@ -44,6 +45,9 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
   /// My die spins from the tap until my roll is presented (or rejected).
   bool _mySpin = false;
 
+  /// Presented rolls per player, newest first (shown as small faces).
+  final Map<String, List<int>> _rollHistory = {};
+
   @override
   void initState() {
     super.initState();
@@ -75,7 +79,10 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     if (event.kind == LudoPresentationKind.dice && event.playerId != null) {
       setState(() {
         _diceKeys[event.playerId!] = next.sequence;
-        if (event.diceValue != null) _presentedDice[event.playerId!] = event.diceValue!;
+        if (event.diceValue != null) {
+          _presentedDice[event.playerId!] = event.diceValue!;
+          _rollHistory[event.playerId!] = [event.diceValue!, ...?_rollHistory[event.playerId!]].take(3).toList();
+        }
         if (event.playerId == me) _mySpin = false;
       });
     }
@@ -181,63 +188,90 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       pendingTokenId: _pendingTokenId,
     );
 
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
+    final banner = _banner(game, snapshot, me, participants);
+    final hint = _hint(game, me, presenting);
+
+    // The match is always presented on the dark game table, regardless of the
+    // app theme, like a dedicated game screen.
+    return Theme(
+      data: AppTheme.dark(),
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0B1530),
+        body: Stack(
           children: [
-            _ConnectionBanner(status: socket, recovering: match.recovering),
-            _TopBar(
-              unread: chat.unread,
-              sessionCode: match.sessionCode,
-              soundOn: soundOn,
-              recovering: match.recovering,
-              onChat: () => _openChat(context),
-              onToggleSound: () => ref.read(gameSoundEnabledProvider.notifier).toggle(),
-              onMenu: () => _openMenu(context, match),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Column(
-                  children: [
-                    _SeatRow(left: seatAt(LudoCorner.topLeft), right: seatAt(LudoCorner.topRight)),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: Center(
-                        child: LudoBoard(
-                          tokens: tokens,
-                          orientation: orientation,
-                          animatedMove: animation.current?.kind == LudoPresentationKind.move ? animation.current?.move : null,
-                          animationSequence: animation.sequence,
-                          onStep: () => ref.read(gameSoundServiceProvider).play(GameSound.step, volume: 0.5),
-                        ),
+            const Positioned.fill(child: RepaintBoundary(child: CustomPaint(painter: _TableBackdrop()))),
+            SafeArea(
+              child: Column(
+                children: [
+                  _ConnectionBanner(status: socket, recovering: match.recovering),
+                  _TopBar(
+                    unread: chat.unread,
+                    soundOn: soundOn,
+                    recovering: match.recovering,
+                    onExit: () => _confirmExit(context, game),
+                    onChat: () => _openChat(context),
+                    onToggleSound: () => ref.read(gameSoundEnabledProvider.notifier).toggle(),
+                    onMenu: () => _openMenu(context, match),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Column(
+                        children: [
+                          _SeatRow(left: seatAt(LudoCorner.topLeft), right: seatAt(LudoCorner.topRight)),
+                          const SizedBox(height: 6),
+                          _TurnBanner(banner: banner),
+                          const SizedBox(height: 8),
+                          Expanded(
+                            child: Center(
+                              child: LudoBoard(
+                                tokens: tokens,
+                                orientation: orientation,
+                                animatedMove:
+                                    animation.current?.kind == LudoPresentationKind.move ? animation.current?.move : null,
+                                animationSequence: animation.sequence,
+                                onStep: () => ref.read(gameSoundServiceProvider).play(GameSound.step, volume: 0.5),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          _SeatRow(
+                            left: seatAt(LudoCorner.bottomLeft),
+                            right: seatAt(LudoCorner.bottomRight),
+                            onWarningSecond: () => ref.read(gameSoundServiceProvider).play(GameSound.tick, volume: 0.6),
+                            warnUserId: me,
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    _SeatRow(
-                      left: seatAt(LudoCorner.bottomLeft),
-                      right: seatAt(LudoCorner.bottomRight),
-                      onWarningSecond: () => ref.read(gameSoundServiceProvider).play(GameSound.tick, volume: 0.6),
-                      warnUserId: me,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                if (match.error != null) _InlineMessage(message: match.error!),
-                _Headline(text: _headline(game, snapshot, me, participants)),
-                if (game.phase == LudoMatchPhase.finished && !presenting) ...[
-                  const SizedBox(height: 8),
-                  FilledButton.icon(
-                    onPressed: () => context.pushReplacement('/ludo/result/${widget.matchId}'),
-                    icon: const Icon(Icons.emoji_events_outlined),
-                    label: const Text('View result'),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      if (match.error != null) _InlineMessage(message: match.error!),
+                      SizedBox(
+                        height: 20,
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 200),
+                          child: Text(
+                            hint,
+                            key: ValueKey(hint),
+                            style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 13, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+                      if (game.phase == LudoMatchPhase.finished && !presenting) ...[
+                        const SizedBox(height: 8),
+                        FilledButton.icon(
+                          onPressed: () => context.pushReplacement('/ludo/result/${widget.matchId}'),
+                          icon: const Icon(Icons.emoji_events_outlined),
+                          label: const Text('View result'),
+                        ),
+                      ],
+                    ]),
                   ),
                 ],
-              ]),
+              ),
             ),
           ],
         ),
@@ -293,7 +327,11 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       corner: orientation.cornerOf(participant.color ?? LudoColor.red),
       isMe: isMe,
       active: active,
-      diceValue: _presentedDice[userId] ?? (preGame ? snapshot.startingRoll.rolls[userId] : null),
+      // Presented face first; after a reconnect fall back to the last known
+      // roll, but never while a roll is queued (that would spoil it).
+      diceValue: _presentedDice[userId] ??
+          (animation.busy ? null : match.lastDiceByPlayer[userId]) ??
+          (preGame ? snapshot.startingRoll.rolls[userId] : null),
       diceKey: _diceKeys[userId] ?? 0,
       spinning: isMe && _mySpin,
       diceState: diceState,
@@ -302,6 +340,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       status: status,
       rank: rankIndex >= 0 && game.players.length > 2 ? rankIndex + 1 : (rankIndex == 0 ? 1 : null),
       resigned: resigned,
+      recentRolls: _rollHistory[userId] ?? const [],
       onRoll: canStartRoll || canRoll ? () => _rollMine(startRoll: canStartRoll) : null,
     );
   }
@@ -366,25 +405,57 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     ];
   }
 
-  String _headline(LudoGameState game, LudoRuntimeSnapshot snapshot, String? me, List<LudoMatchParticipant> participants) {
-    String name(String? id) {
-      if (id == me) return 'You';
-      return participants.where((p) => p.userId == id).firstOrNull?.displayLabel() ?? 'Opponent';
-    }
+  _BannerData _banner(LudoGameState game, LudoRuntimeSnapshot snapshot, String? me, List<LudoMatchParticipant> participants) {
+    LudoMatchParticipant? find(String? id) => participants.where((p) => p.userId == id).firstOrNull;
+    String name(String? id) => (find(id)?.displayLabel() ?? 'Opponent').toUpperCase();
+    const gold = Color(0xFFFFC83D);
 
     if (game.phase == LudoMatchPhase.finished) {
-      return game.winnerOrder.isNotEmpty && game.winnerOrder.first == me ? 'You won!' : '${name(game.winnerOrder.firstOrNull)} won';
+      final winner = game.winnerOrder.firstOrNull;
+      return _BannerData(
+        winner == me ? 'YOU WON!' : '${name(winner)} WON',
+        find(winner)?.color?.color ?? gold,
+        mine: winner == me,
+      );
     }
     if (game.phase == LudoMatchPhase.preGame) {
       final mine = me != null && snapshot.startingRoll.candidatePlayerIds.contains(me) && !snapshot.startingRoll.rolls.containsKey(me);
-      if (snapshot.startingRoll.round > 1) return mine ? 'Tie! Roll again' : 'Tie, rolling again…';
-      return mine ? 'Roll to decide who starts' : 'Highest roll starts';
+      if (mine) return _BannerData(snapshot.startingRoll.round > 1 ? 'TIE! ROLL AGAIN' : 'ROLL TO START', find(me)?.color?.color ?? gold, mine: true);
+      return const _BannerData('WHO STARTS?', gold);
     }
     final current = game.currentPlayerId;
-    if (current == me) {
-      return game.turnPhase == LudoTurnPhase.waitingForMove ? 'Choose a token to move' : 'Your turn: tap your dice';
+    final color = find(current)?.color?.color ?? gold;
+    return current == me ? _BannerData('YOUR TURN', color, mine: true) : _BannerData("${name(current)}'S TURN", color);
+  }
+
+  String _hint(LudoGameState game, String? me, bool presenting) {
+    if (presenting || game.currentPlayerId != me || game.phase != LudoMatchPhase.playing) return '';
+    return game.turnPhase == LudoTurnPhase.waitingForMove ? 'Tap a glowing token to move' : 'Tap your dice to roll';
+  }
+
+  Future<void> _confirmExit(BuildContext context, LudoGameState game) async {
+    if (game.phase == LudoMatchPhase.finished) {
+      context.pushReplacement('/ludo/result/${widget.matchId}');
+      return;
     }
-    return '${name(current)} ${game.turnPhase == LudoTurnPhase.waitingForMove ? 'is moving' : 'is rolling'}';
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Leave the match?'),
+        content: const Text('Leaving now forfeits this match and your stake.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep playing')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Leave'),
+          ),
+        ],
+      ),
+    );
+    if (leave != true || !context.mounted) return;
+    final ok = await ref.read(ludoMatchControllerProvider.notifier).resign();
+    if (ok && context.mounted) context.go('/home');
   }
 
   Future<void> _confirmResign(BuildContext context) async {
@@ -478,84 +549,206 @@ class _SeatRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget seat(LudoSeatView? view) => view == null
-        ? const SizedBox(width: 1, height: 1)
-        : LudoSeat(seat: view, onWarningSecond: view.participant.userId == warnUserId ? onWarningSecond : null);
+    // Each seat owns half the row and scales down on narrow phones instead of
+    // overflowing (4 players on a 360px screen).
+    Widget seat(LudoSeatView? view, Alignment alignment) => Expanded(
+          child: Align(
+            alignment: alignment,
+            child: view == null
+                ? null
+                : FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: alignment,
+                    child: LudoSeat(seat: view, onWarningSecond: view.participant.userId == warnUserId ? onWarningSecond : null),
+                  ),
+          ),
+        );
     return SizedBox(
-      height: 104,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [seat(left), const Spacer(), seat(right)],
+      height: 108,
+      child: Row(children: [seat(left, Alignment.centerLeft), const SizedBox(width: 8), seat(right, Alignment.centerRight)]),
+    );
+  }
+}
+
+class _BannerData {
+  const _BannerData(this.text, this.color, {this.mine = false});
+  final String text;
+  final Color color;
+  final bool mine;
+}
+
+/// "YOUR TURN" / "SAMUEL'S TURN" pill in the current player's color. Pulses
+/// when it is my move so it is impossible to miss.
+class _TurnBanner extends StatefulWidget {
+  const _TurnBanner({required this.banner});
+  final _BannerData banner;
+
+  @override
+  State<_TurnBanner> createState() => _TurnBannerState();
+}
+
+class _TurnBannerState extends State<_TurnBanner> with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+
+  @override
+  void initState() {
+    super.initState();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(covariant _TurnBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.banner.mine != widget.banner.mine) _sync();
+  }
+
+  void _sync() => widget.banner.mine ? _pulse.repeat(reverse: true) : (_pulse..stop()..value = 0);
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final banner = widget.banner;
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 260),
+      transitionBuilder: (child, animation) => ScaleTransition(
+        scale: Tween(begin: 0.85, end: 1.0).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutBack)),
+        child: FadeTransition(opacity: animation, child: child),
+      ),
+      child: AnimatedBuilder(
+        key: ValueKey(banner.text),
+        animation: _pulse,
+        builder: (context, child) => Transform.scale(scale: 1 + _pulse.value * 0.05, child: child),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+          decoration: BoxDecoration(
+            color: banner.color,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.85), width: 1.5),
+            boxShadow: [BoxShadow(color: banner.color.withValues(alpha: 0.6), blurRadius: 14)],
+          ),
+          child: Text(
+            banner.text,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 1.2),
+          ),
+        ),
       ),
     );
   }
 }
 
-class _Headline extends StatelessWidget {
-  const _Headline({required this.text});
-  final String text;
+/// Deep navy table with a faint scattered-dice pattern.
+class _TableBackdrop extends CustomPainter {
+  const _TableBackdrop();
 
   @override
-  Widget build(BuildContext context) => AnimatedSwitcher(
-        duration: const Duration(milliseconds: 200),
-        child: Text(
-          text,
-          key: ValueKey(text),
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-        ),
-      );
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF0B1530), Color(0xFF13306B), Color(0xFF0B1530)],
+        ).createShader(rect),
+    );
+    final tile = Paint()..color = Colors.white.withValues(alpha: 0.035);
+    final pip = Paint()..color = Colors.white.withValues(alpha: 0.05);
+    const step = 74.0;
+    canvas.save();
+    canvas.rotate(-0.35);
+    for (var y = -size.height; y < size.height * 1.6; y += step) {
+      for (var x = -size.width; x < size.width * 1.6; x += step) {
+        final offset = ((y / step).round().isEven) ? 0.0 : step / 2;
+        final r = Rect.fromLTWH(x + offset, y, 34, 34);
+        canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(8)), tile);
+        canvas.drawCircle(r.center, 3.2, pip);
+      }
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _TableBackdrop oldDelegate) => false;
 }
 
 class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.unread,
-    required this.sessionCode,
     required this.soundOn,
     required this.recovering,
+    required this.onExit,
     required this.onChat,
     required this.onToggleSound,
     required this.onMenu,
   });
 
   final int unread;
-  final String? sessionCode;
   final bool soundOn;
   final bool recovering;
+  final VoidCallback onExit;
   final VoidCallback onChat;
   final VoidCallback onToggleSound;
   final VoidCallback onMenu;
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Row(children: [
-          IconButton(
-            tooltip: 'Match chat',
-            onPressed: onChat,
-            icon: Badge(isLabelVisible: unread > 0, label: Text('$unread'), child: const Icon(Icons.chat_bubble_outline)),
-          ),
-          Expanded(
-            child: Text(
-              sessionCode == null || sessionCode!.isEmpty ? '' : 'Game $sessionCode',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+  Widget build(BuildContext context) {
+    Widget pill({required Widget child, VoidCallback? onTap, String? tooltip}) => Tooltip(
+          message: tooltip ?? '',
+          child: Material(
+            color: Colors.white.withValues(alpha: 0.1),
+            shape: StadiumBorder(side: BorderSide(color: Colors.white.withValues(alpha: 0.18))),
+            child: InkWell(
+              customBorder: const StadiumBorder(),
+              onTap: onTap,
+              child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7), child: child),
             ),
           ),
-          IconButton(
-            tooltip: soundOn ? 'Mute sounds' : 'Unmute sounds',
-            onPressed: onToggleSound,
-            icon: Icon(soundOn ? Icons.volume_up_rounded : Icons.volume_off_rounded),
+        );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+      child: Row(children: [
+        pill(
+          onTap: onExit,
+          tooltip: 'Exit match',
+          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.chevron_left_rounded, size: 18, color: Color(0xFFFF7A7A)),
+            Text('Exit', style: TextStyle(color: Color(0xFFFF7A7A), fontWeight: FontWeight.w700)),
+          ]),
+        ),
+        const Spacer(),
+        pill(
+          onTap: onToggleSound,
+          tooltip: soundOn ? 'Mute sounds' : 'Unmute sounds',
+          child: Icon(soundOn ? Icons.volume_up_rounded : Icons.volume_off_rounded, size: 18, color: Colors.white),
+        ),
+        const SizedBox(width: 8),
+        pill(
+          onTap: onChat,
+          tooltip: 'Match chat',
+          child: Badge(
+            isLabelVisible: unread > 0,
+            label: Text('$unread'),
+            child: const Icon(Icons.chat_bubble_outline_rounded, size: 18, color: Colors.white),
           ),
-          IconButton(
-            tooltip: 'Menu',
-            onPressed: onMenu,
-            icon: recovering
-                ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.more_horiz_rounded),
-          ),
-        ]),
-      );
+        ),
+        const SizedBox(width: 8),
+        pill(
+          onTap: onMenu,
+          tooltip: 'Menu',
+          child: recovering
+              ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.more_horiz_rounded, size: 18, color: Colors.white),
+        ),
+      ]),
+    );
+  }
 }
 
 class _MatchChatSheet extends ConsumerStatefulWidget {

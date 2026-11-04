@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/core/theme/app_spacing.dart';
 import 'package:friends_game_app/core/utils/validators.dart';
 import 'package:friends_game_app/core/widgets/app_button.dart';
+import 'package:friends_game_app/core/widgets/app_logo.dart';
 import 'package:friends_game_app/core/widgets/app_text_field.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 
@@ -34,8 +35,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               child: Form(
                 key: _formKey,
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Friends Game Hub', style: Theme.of(context).textTheme.headlineMedium),
-                  const SizedBox(height: 8),
+                  const AppLogo(size: 52),
+                  const SizedBox(height: 20),
                   Text('Sign in to continue.', style: Theme.of(context).textTheme.bodyLarge),
                   const SizedBox(height: 32),
                   AppTextField(controller: _phone, label: 'Phone number', keyboardType: TextInputType.phone, prefixIcon: Icons.phone_rounded, validator: Validators.phone),

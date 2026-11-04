@@ -54,7 +54,7 @@ class _LudoDiceState extends State<LudoDice> with TickerProviderStateMixin {
     super.initState();
     _shown = (widget.value ?? 1).clamp(1, 6);
     _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100));
-    _roll = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
+    _roll = AnimationController(vsync: this, duration: const Duration(milliseconds: 620));
     _roll.addListener(_onRollTick);
     _syncPulse();
     if (widget.spinning) _spin();
@@ -144,9 +144,10 @@ class _LudoDiceState extends State<LudoDice> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final accent = widget.accentColor?.color ?? Theme.of(context).colorScheme.primary;
+    final color = widget.accentColor ?? LudoColor.green;
     final effective = _effectiveState;
     final face = widget.value == null && !_rolling ? null : _shown;
+    final dimmed = effective == LudoDiceVisualState.disabled || effective == LudoDiceVisualState.waiting;
 
     final semanticsLabel = switch (effective) {
       LudoDiceVisualState.ready => 'Roll dice',
@@ -163,50 +164,62 @@ class _LudoDiceState extends State<LudoDice> with TickerProviderStateMixin {
           button: _enabled,
           enabled: _enabled,
           label: semanticsLabel,
-          child: AnimatedBuilder(
-            animation: Listenable.merge([_pulse, _roll]),
-            builder: (context, child) {
-              final lift = effective == LudoDiceVisualState.ready ? 1.0 + (_pulse.value * 0.04) : 1.0;
-              final tilt = _rolling ? math.sin(_roll.value * math.pi * 6) * 0.08 : 0.0;
-              return Transform.scale(
-                scale: lift,
-                child: Transform.rotate(
-                  angle: tilt,
-                  child: child,
-                ),
-              );
-            },
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: _enabled ? widget.onTap : null,
-                borderRadius: BorderRadius.circular(widget.size * 0.22),
-                child: _DiceFace(
-                  value: face,
-                  size: widget.size,
-                  accent: accent,
-                  emphasized: effective == LudoDiceVisualState.ready || effective == LudoDiceVisualState.rolling,
-                  muted: effective == LudoDiceVisualState.disabled || effective == LudoDiceVisualState.waiting,
-                ),
+          child: GestureDetector(
+            onTap: _enabled ? widget.onTap : null,
+            child: AnimatedBuilder(
+              animation: Listenable.merge([_pulse, _roll]),
+              builder: (context, child) {
+                final size = widget.size;
+                double dy = 0, angle = 0, sx = 1, sy = 1;
+                if (_rolling) {
+                  final t = _roll.value;
+                  if (_settleTo == null) {
+                    // Waiting for the server: continuous tumble in place.
+                    dy = -(math.sin(t * math.pi * 2).abs()) * size * 0.18;
+                    angle = t * math.pi * 2;
+                  } else {
+                    // Settle: hop, ~1.5 turns easing out, squash on landing.
+                    final eased = Curves.easeOutCubic.transform(t);
+                    dy = -math.sin(math.pi * math.min(t / 0.8, 1)) * size * 0.35;
+                    angle = eased * math.pi * 3;
+                    if (t > 0.8) {
+                      final k = math.sin((t - 0.8) / 0.2 * math.pi);
+                      sy = 1 - 0.14 * k;
+                      sx = 1 + 0.1 * k;
+                    }
+                  }
+                } else if (effective == LudoDiceVisualState.ready) {
+                  dy = -_pulse.value * size * 0.06;
+                }
+                return Transform.translate(
+                  offset: Offset(0, dy),
+                  child: Transform(
+                    alignment: Alignment.bottomCenter,
+                    transform: Matrix4.diagonal3Values(sx, sy, 1),
+                    child: Transform.rotate(angle: angle, child: child),
+                  ),
+                );
+              },
+              child: _DiceFace(
+                value: face,
+                size: widget.size,
+                color: color,
+                glow: effective == LudoDiceVisualState.ready,
+                dimmed: dimmed,
               ),
             ),
           ),
         ),
         if (widget.showRollHint && effective == LudoDiceVisualState.ready) ...[
-          const SizedBox(height: 6),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.arrow_upward_rounded, size: 14, color: accent),
-              const SizedBox(width: 2),
-              Text(
-                'Roll',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: accent,
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-            ],
+          const SizedBox(height: 4),
+          Text(
+            'TAP TO ROLL',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.9),
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.1,
+            ),
           ),
         ],
       ],
@@ -214,76 +227,43 @@ class _LudoDiceState extends State<LudoDice> with TickerProviderStateMixin {
   }
 }
 
+/// Player-colored die body with white pips.
 class _DiceFace extends StatelessWidget {
-  const _DiceFace({
-    required this.value,
-    required this.size,
-    required this.accent,
-    required this.emphasized,
-    required this.muted,
-  });
+  const _DiceFace({required this.value, required this.size, required this.color, this.glow = false, this.dimmed = false});
 
   final int? value;
   final double size;
-  final Color accent;
-  final bool emphasized;
-  final bool muted;
+  final LudoColor color;
+  final bool glow;
+  final bool dimmed;
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final faceColor = muted
-        ? (isDark ? const Color(0xFFE8E4DC) : const Color(0xFFF7F4EE)).withValues(alpha: 0.72)
-        : (isDark ? const Color(0xFFF3EFE6) : const Color(0xFFFFFCF7));
-    final pipColor = muted ? const Color(0xFF5A5A5A).withValues(alpha: 0.55) : const Color(0xFF1F1F1F);
-
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.22),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color.lerp(faceColor, Colors.white, 0.35)!,
-            faceColor,
-            Color.lerp(faceColor, const Color(0xFFD8D2C8), 0.35)!,
+    final body = dimmed ? color.mutedColor : color.color;
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 200),
+      opacity: dimmed ? 0.7 : 1,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(size * 0.22),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color.lerp(body, Colors.white, 0.28)!, body, Color.lerp(body, Colors.black, 0.25)!],
+            stops: const [0, 0.5, 1],
+          ),
+          border: Border.all(color: Colors.white.withValues(alpha: glow ? 0.95 : 0.5), width: glow ? 2.4 : 1.4),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: size * 0.16, offset: Offset(0, size * 0.08)),
+            if (glow) BoxShadow(color: body.withValues(alpha: 0.75), blurRadius: size * 0.4, spreadRadius: size * 0.04),
           ],
         ),
-        border: Border.all(
-          color: accent.withValues(alpha: emphasized ? 0.85 : 0.35),
-          width: emphasized ? 2.2 : 1.3,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: emphasized ? 0.22 : 0.12),
-            blurRadius: emphasized ? 14 : 8,
-            offset: Offset(0, emphasized ? 5 : 3),
-          ),
-          if (emphasized)
-            BoxShadow(
-              color: accent.withValues(alpha: 0.22),
-              blurRadius: 12,
-              spreadRadius: 0.5,
-            ),
-        ],
+        child: value == null
+            ? null
+            : CustomPaint(painter: _PipPainter(value: value!.clamp(1, 6), color: Colors.white), size: Size.square(size)),
       ),
-      child: value == null
-          ? Center(
-              child: Text(
-                '–',
-                style: TextStyle(
-                  fontSize: size * 0.38,
-                  fontWeight: FontWeight.w700,
-                  color: pipColor.withValues(alpha: 0.45),
-                ),
-              ),
-            )
-          : CustomPaint(
-              painter: _PipPainter(value: value!.clamp(1, 6), color: pipColor),
-              size: Size.square(size),
-            ),
     );
   }
 }
@@ -298,19 +278,8 @@ class _PipPainter extends CustomPainter {
     1: [Alignment.center],
     2: [Alignment(-0.45, -0.45), Alignment(0.45, 0.45)],
     3: [Alignment(-0.45, -0.45), Alignment.center, Alignment(0.45, 0.45)],
-    4: [
-      Alignment(-0.45, -0.45),
-      Alignment(0.45, -0.45),
-      Alignment(-0.45, 0.45),
-      Alignment(0.45, 0.45),
-    ],
-    5: [
-      Alignment(-0.45, -0.45),
-      Alignment(0.45, -0.45),
-      Alignment.center,
-      Alignment(-0.45, 0.45),
-      Alignment(0.45, 0.45),
-    ],
+    4: [Alignment(-0.45, -0.45), Alignment(0.45, -0.45), Alignment(-0.45, 0.45), Alignment(0.45, 0.45)],
+    5: [Alignment(-0.45, -0.45), Alignment(0.45, -0.45), Alignment.center, Alignment(-0.45, 0.45), Alignment(0.45, 0.45)],
     6: [
       Alignment(-0.45, -0.5),
       Alignment(0.45, -0.5),
@@ -323,39 +292,28 @@ class _PipPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final radius = size.shortestSide * (value == 1 ? 0.12 : 0.085);
+    final shade = Paint()..color = Colors.black.withValues(alpha: 0.25);
     final paint = Paint()..color = color;
-    final radius = size.shortestSide * 0.085;
-    final spots = _positions[value] ?? _positions[1]!;
-    for (final align in spots) {
-      final offset = Offset(
-        (align.x + 1) / 2 * size.width,
-        (align.y + 1) / 2 * size.height,
-      );
+    for (final align in _positions[value] ?? _positions[1]!) {
+      final offset = Offset((align.x + 1) / 2 * size.width, (align.y + 1) / 2 * size.height);
+      canvas.drawCircle(offset + Offset(0, radius * 0.25), radius, shade);
       canvas.drawCircle(offset, radius, paint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _PipPainter oldDelegate) =>
-      oldDelegate.value != value || oldDelegate.color != color;
+  bool shouldRepaint(covariant _PipPainter oldDelegate) => oldDelegate.value != value || oldDelegate.color != color;
 }
 
-/// Renders a static pip face for tests / start-roll chips without animation.
+/// Static face (roll history chips, tests).
 class LudoDiceFace extends StatelessWidget {
-  const LudoDiceFace({super.key, required this.value, this.size = 36, this.accent});
+  const LudoDiceFace({super.key, required this.value, this.size = 36, this.color = LudoColor.green});
 
   final int value;
   final double size;
-  final Color? accent;
+  final LudoColor color;
 
   @override
-  Widget build(BuildContext context) {
-    return _DiceFace(
-      value: value.clamp(1, 6),
-      size: size,
-      accent: accent ?? Theme.of(context).colorScheme.outline,
-      emphasized: false,
-      muted: false,
-    );
-  }
+  Widget build(BuildContext context) => _DiceFace(value: value.clamp(1, 6), size: size, color: color);
 }

@@ -37,7 +37,7 @@ class LudoBoard extends StatelessWidget {
         builder: (context, constraints) {
           final size = constraints.maxWidth;
           final cell = size / LudoBoardGeometry.gridSize;
-          final tokenSize = cell * 0.72;
+          final tokenSize = cell * 0.95;
           final move = animatedMove;
 
           Offset centerOf(LudoColor color, int progress, int baseIndex, {int stackIndex = 0, int stackCount = 1}) =>
@@ -70,13 +70,15 @@ class LudoBoard extends StatelessWidget {
                 ),
               ],
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  // Static board, isolated so token/timer rebuilds skip this layer.
-                  Positioned.fill(
+            // Only the painted board is clipped; pin heads on the edge rows may
+            // rise above it.
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                // Static board, isolated so token/timer rebuilds skip this layer.
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
                     child: RepaintBoundary(
                       child: RotatedBox(
                         quarterTurns: orientation.quarterTurns,
@@ -84,39 +86,42 @@ class LudoBoard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  for (final token in tokens)
-                    if (move?.tokenAfter.id != token.id)
-                      _PlacedToken(
-                        // Keys keep each token's element (and its implicit
-                        // animation) attached to the right token.
-                        key: ValueKey(token.id),
-                        token: token,
-                        center: holdAt != null && move!.capturedTokenIds.contains(token.id)
-                            ? holdAt
-                            : centerOf(token.color, token.progress, token.baseIndex,
-                                stackIndex: token.stackIndex, stackCount: token.stackCount),
-                        tokenSize: tokenSize,
-                      ),
-                  if (move != null)
-                    _WalkingToken(
-                      key: ValueKey('move-$animationSequence'),
-                      move: move,
-                      cells: [
-                        for (final progress in LudoMotion.path(move))
-                          centerOf(move.tokenAfter.color, progress, _baseIndex(move.tokenAfter.id)),
-                      ],
+                ),
+                for (final token in tokens)
+                  if (move?.tokenAfter.id != token.id)
+                    _PlacedToken(
+                      // Keys keep each token's element (and its implicit
+                      // animation) attached to the right token.
+                      key: ValueKey(token.id),
+                      token: token,
+                      center: holdAt != null && move!.capturedTokenIds.contains(token.id)
+                          ? holdAt
+                          : centerOf(token.color, token.progress, token.baseIndex,
+                              stackIndex: token.stackIndex, stackCount: token.stackCount),
                       tokenSize: tokenSize,
-                      lift: cell * 0.38,
-                      onStep: onStep,
                     ),
-                ],
-              ),
+                if (move != null)
+                  _WalkingToken(
+                    key: ValueKey('move-$animationSequence'),
+                    move: move,
+                    cells: [
+                      for (final progress in LudoMotion.path(move))
+                        centerOf(move.tokenAfter.color, progress, _baseIndex(move.tokenAfter.id)),
+                    ],
+                    tokenSize: tokenSize,
+                    lift: cell * 0.38,
+                    onStep: onStep,
+                  ),
+              ],
             ),
           );
         },
       ),
     );
   }
+
+  /// Tokens are pins: place them so the tip (not the middle) sits on the cell.
+  static const pinAnchor = 0.72;
 
   static int _baseIndex(String tokenId) {
     final value = int.tryParse(tokenId.split('-').last) ?? 1;
@@ -139,7 +144,7 @@ class _PlacedToken extends StatelessWidget {
       duration: LudoMotion.captureFlight,
       curve: Curves.easeInOutCubic,
       left: center.dx - tokenSize / 2,
-      top: center.dy - tokenSize / 2,
+      top: center.dy - tokenSize * LudoBoard.pinAnchor,
       width: tokenSize,
       height: tokenSize,
       child: LudoTokenPiece(
@@ -225,7 +230,7 @@ class _WalkingTokenState extends State<_WalkingToken> with SingleTickerProviderS
         final center = Offset.lerp(from, to, Curves.easeInOut.transform(f))! - Offset(0, widget.lift * arc);
         return Positioned(
           left: center.dx - widget.tokenSize / 2,
-          top: center.dy - widget.tokenSize / 2,
+          top: center.dy - widget.tokenSize * LudoBoard.pinAnchor,
           width: widget.tokenSize,
           height: widget.tokenSize,
           child: Transform.scale(scale: 1 + 0.14 * arc, child: child),

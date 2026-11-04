@@ -120,7 +120,7 @@ void main() {
           ),
         ),
       );
-      await tester.tap(find.byType(InkWell));
+      await tester.tap(find.bySemanticsLabel('Roll dice'));
       await tester.pump();
       expect(tapped, isTrue);
     });

@@ -3,16 +3,19 @@ import 'package:flutter/material.dart';
 enum LudoColor { red, green, yellow, blue }
 
 extension LudoColorX on LudoColor {
-  /// Refined classic Ludo palette — game colors, not app theme colors.
+  /// Vivid classic Ludo palette: game colors, independent of the app theme.
   Color get color => switch (this) {
-        LudoColor.red => const Color(0xFFC44536),
-        LudoColor.green => const Color(0xFF2A9D5C),
-        LudoColor.yellow => const Color(0xFFD4A017),
-        LudoColor.blue => const Color(0xFF2F6FBF),
+        LudoColor.red => const Color(0xFFE53935),
+        LudoColor.green => const Color(0xFF1FA35A),
+        LudoColor.yellow => const Color(0xFFF5B800),
+        LudoColor.blue => const Color(0xFF1E88E5),
       };
 
-  /// Slightly quieter variant for inactive 1v1 chrome.
-  Color get mutedColor => Color.lerp(color, const Color(0xFF8A8A8A), 0.28)!;
+  /// Darker shade for rims, pips on light faces and pressed states.
+  Color get deepColor => Color.lerp(color, Colors.black, 0.28)!;
+
+  /// Quieter variant for inactive seats.
+  Color get mutedColor => Color.lerp(color, const Color(0xFF8A8A8A), 0.35)!;
 
   int get startIndex => switch (this) {
         LudoColor.red => 0,

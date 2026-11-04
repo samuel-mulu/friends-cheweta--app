@@ -92,7 +92,8 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.byType(LudoSeat), findsNWidgets(2));
     expect(find.text('You'), findsOneWidget);
-    expect(find.text('Your turn: tap your dice'), findsOneWidget);
+    expect(find.text('YOUR TURN'), findsOneWidget);
+    expect(find.text('Tap your dice to roll'), findsOneWidget);
     final seats = tester.widgetList<LudoSeat>(find.byType(LudoSeat)).toList();
     final me = tester.getCenter(find.byWidget(seats.firstWhere((w) => w.seat.isMe)));
     final opponent = tester.getCenter(find.byWidget(seats.firstWhere((w) => !w.seat.isMe)));

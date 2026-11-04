@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
@@ -24,6 +23,7 @@ class LudoSeatView {
     this.status,
     this.rank,
     this.resigned = false,
+    this.recentRolls = const [],
     this.onRoll,
   });
 
@@ -42,14 +42,17 @@ class LudoSeatView {
   /// Finishing position once this player has finished (1 = winner).
   final int? rank;
   final bool resigned;
+
+  /// Most recent rolls first (max 3), shown as small faces under the dice.
+  final List<int> recentRolls;
   final VoidCallback? onRoll;
 
   LudoColor get color => participant.color ?? LudoColor.red;
   bool get onRight => corner == LudoCorner.topRight || corner == LudoCorner.bottomRight;
 }
 
-/// A corner seat: avatar with turn ring + name, and the player's own dice on
-/// the side facing the board.
+/// A corner seat: avatar card (name, countdown) and the player's own dice on
+/// the side facing the board, with their last rolls underneath.
 class LudoSeat extends StatelessWidget {
   const LudoSeat({super.key, required this.seat, this.onWarningSecond});
 
@@ -60,180 +63,129 @@ class LudoSeat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final avatar = Column(
+    final profile = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _TurnRingAvatar(seat: seat, onWarningSecond: onWarningSecond),
+        _AvatarCard(seat: seat),
         const SizedBox(height: 4),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 84),
+          constraints: const BoxConstraints(maxWidth: 88),
           child: Text(
             seat.isMe ? 'You' : seat.participant.displayLabel(),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  fontWeight: seat.active ? FontWeight.w800 : FontWeight.w600,
-                ),
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 12.5,
+              fontWeight: seat.active ? FontWeight.w800 : FontWeight.w600,
+            ),
           ),
         ),
-        if (seat.status != null)
-          Text(
-            seat.status!,
-            maxLines: 1,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: seat.active ? seat.color.color : Theme.of(context).colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
+        SizedBox(
+          height: 16,
+          child: seat.active && seat.turnEndsAt != null
+              ? _Countdown(
+                  endsAt: seat.turnEndsAt!,
+                  onWarningSecond: onWarningSecond,
+                )
+              : seat.status == null
+                  ? null
+                  : Text(
+                      seat.status!,
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 11, fontWeight: FontWeight.w600),
+                    ),
+        ),
       ],
     );
 
-    final dice = _DiceDock(seat: seat);
-    final children = seat.onRight ? [dice, const SizedBox(width: 10), avatar] : [avatar, const SizedBox(width: 10), dice];
+    final dice = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        LudoDice(
+          value: seat.diceValue,
+          animateKey: seat.diceKey,
+          spinning: seat.spinning,
+          state: seat.diceState,
+          onTap: seat.diceState == LudoDiceVisualState.ready ? seat.onRoll : null,
+          accentColor: seat.color,
+          size: seat.isMe ? 58 : 44,
+          showRollHint: seat.isMe && seat.diceState == LudoDiceVisualState.ready,
+        ),
+        if (seat.recentRolls.isNotEmpty && !(seat.isMe && seat.diceState == LudoDiceVisualState.ready)) ...[
+          const SizedBox(height: 6),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final roll in seat.recentRolls.take(3))
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 1.5),
+                  child: Opacity(opacity: 0.85, child: LudoDiceFace(value: roll, size: 15, color: seat.color)),
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
+
+    final children = seat.onRight ? [dice, const SizedBox(width: 12), profile] : [profile, const SizedBox(width: 12), dice];
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 220),
-      opacity: seat.resigned ? 0.45 : 1,
-      child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: children),
+      opacity: seat.resigned ? 0.4 : 1,
+      child: Row(mainAxisSize: MainAxisSize.min, children: children),
     );
   }
 }
 
-class _DiceDock extends StatelessWidget {
-  const _DiceDock({required this.seat});
+class _AvatarCard extends StatelessWidget {
+  const _AvatarCard({required this.seat});
   final LudoSeatView seat;
 
   @override
   Widget build(BuildContext context) {
-    final ready = seat.diceState == LudoDiceVisualState.ready;
-    // The active seat's dock lights up; idle seats stay quiet.
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        color: seat.active ? seat.color.color.withValues(alpha: 0.14) : Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: seat.active ? seat.color.color.withValues(alpha: 0.6) : Colors.transparent,
-          width: 1.5,
-        ),
-      ),
-      child: LudoDice(
-        value: seat.diceValue,
-        animateKey: seat.diceKey,
-        spinning: seat.spinning,
-        state: seat.diceState,
-        onTap: ready ? seat.onRoll : null,
-        accentColor: seat.color,
-        size: seat.isMe ? 60 : 46,
-        showRollHint: seat.isMe && ready,
-      ),
-    );
-  }
-}
-
-class _TurnRingAvatar extends ConsumerStatefulWidget {
-  const _TurnRingAvatar({required this.seat, this.onWarningSecond});
-  final LudoSeatView seat;
-  final VoidCallback? onWarningSecond;
-
-  @override
-  ConsumerState<_TurnRingAvatar> createState() => _TurnRingAvatarState();
-}
-
-class _TurnRingAvatarState extends ConsumerState<_TurnRingAvatar> {
-  static const _warnFrom = 5;
-  Timer? _ticker;
-  double _fraction = 0;
-  int? _lastWarned;
-
-  @override
-  void initState() {
-    super.initState();
-    _sync();
-  }
-
-  @override
-  void didUpdateWidget(covariant _TurnRingAvatar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.seat.turnEndsAt != widget.seat.turnEndsAt || oldWidget.seat.active != widget.seat.active) {
-      _lastWarned = null;
-      _sync();
-    }
-  }
-
-  void _sync() {
-    _ticker?.cancel();
-    if (widget.seat.active && widget.seat.turnEndsAt != null) {
-      _tick();
-      _ticker = Timer.periodic(const Duration(milliseconds: 100), (_) => _tick());
-    } else if (_fraction != 0) {
-      setState(() => _fraction = 0);
-    }
-  }
-
-  void _tick() {
-    final endsAt = widget.seat.turnEndsAt;
-    if (endsAt == null || !mounted) return;
-    final remaining = endsAt.difference(ref.read(gameSocketServiceProvider).serverNow());
-    final total = Duration(seconds: math.max(widget.seat.turnSeconds, 1));
-    final fraction = (remaining.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0);
-    final secondsLeft = (remaining.inMilliseconds / 1000).ceil();
-    if (secondsLeft > 0 && secondsLeft <= _warnFrom && secondsLeft != _lastWarned) {
-      _lastWarned = secondsLeft;
-      widget.onWarningSecond?.call();
-    }
-    if ((fraction - _fraction).abs() > 0.002) setState(() => _fraction = fraction);
-    if (remaining.isNegative) _ticker?.cancel();
-  }
-
-  @override
-  void dispose() {
-    _ticker?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final seat = widget.seat;
-    final color = seat.color.color;
-    final size = seat.isMe ? 54.0 : 46.0;
-    final urgent = seat.active && _fraction > 0 && _fraction < 0.2;
-    return RepaintBoundary(
-      child: SizedBox.square(
-        dimension: size + 10,
-        child: Stack(
+    final color = seat.color;
+    final size = seat.isMe ? 56.0 : 48.0;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: seat.active
+                  ? [Color.lerp(color.color, Colors.white, 0.2)!, color.deepColor]
+                  : [color.mutedColor, Color.lerp(color.mutedColor, Colors.black, 0.3)!],
+            ),
+            border: Border.all(color: seat.active ? Colors.white : Colors.white.withValues(alpha: 0.35), width: seat.active ? 2.5 : 1.5),
+            boxShadow: [
+              if (seat.active) BoxShadow(color: color.color.withValues(alpha: 0.8), blurRadius: 18, spreadRadius: 2),
+            ],
+          ),
           alignment: Alignment.center,
-          children: [
-            CustomPaint(
-              size: Size.square(size + 10),
-              painter: _RingPainter(
-                fraction: seat.active ? _fraction : 0,
-                color: urgent ? Theme.of(context).colorScheme.error : color,
-                track: color.withValues(alpha: seat.active ? 0.2 : 0.12),
-              ),
-            ),
-            AnimatedScale(
-              duration: const Duration(milliseconds: 220),
-              scale: seat.active ? 1.0 : 0.92,
-              child: CircleAvatar(
-                radius: size / 2,
-                backgroundColor: seat.active ? color : seat.color.mutedColor,
-                child: Text(
-                  _initials(seat.participant.fullName),
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: size * 0.34),
-                ),
-              ),
-            ),
-            if (seat.rank != null)
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: _Badge(text: seat.rank == 1 ? '🏆' : '#${seat.rank}', color: color),
-              ),
-          ],
+          child: Text(
+            _initials(seat.participant.fullName),
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: size * 0.36),
+          ),
         ),
-      ),
+        if (seat.rank != null)
+          Positioned(
+            right: -6,
+            top: -6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(color: const Color(0xFFFFC83D), borderRadius: BorderRadius.circular(10)),
+              child: Text(
+                seat.rank == 1 ? '1st' : '#${seat.rank}',
+                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Color(0xFF3B2A00)),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -244,52 +196,66 @@ class _TurnRingAvatarState extends ConsumerState<_TurnRingAvatar> {
   }
 }
 
-class _Badge extends StatelessWidget {
-  const _Badge({required this.text, required this.color});
-  final String text;
-  final Color color;
+/// Seconds left in the active turn, from the server deadline.
+class _Countdown extends ConsumerStatefulWidget {
+  const _Countdown({required this.endsAt, this.onWarningSecond});
+  final DateTime endsAt;
+  final VoidCallback? onWarningSecond;
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color, width: 1.2),
-        ),
-        child: Text(text, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800)),
-      );
+  ConsumerState<_Countdown> createState() => _CountdownState();
 }
 
-class _RingPainter extends CustomPainter {
-  _RingPainter({required this.fraction, required this.color, required this.track});
-  final double fraction;
-  final Color color;
-  final Color track;
+class _CountdownState extends ConsumerState<_Countdown> {
+  static const _warnFrom = 5;
+  Timer? _ticker;
+  int _seconds = 0;
+  int? _lastWarned;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final stroke = size.width * 0.07;
-    final arcRect = rect.deflate(stroke / 2);
-    canvas.drawArc(arcRect, 0, math.pi * 2, false, Paint()
-      ..color = track
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = stroke);
-    if (fraction <= 0) return;
-    canvas.drawArc(
-      arcRect,
-      -math.pi / 2,
-      math.pi * 2 * fraction,
-      false,
-      Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeWidth = stroke,
-    );
+  void initState() {
+    super.initState();
+    _tick();
+    _ticker = Timer.periodic(const Duration(milliseconds: 200), (_) => _tick());
   }
 
   @override
-  bool shouldRepaint(covariant _RingPainter old) => old.fraction != fraction || old.color != color || old.track != track;
+  void didUpdateWidget(covariant _Countdown oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.endsAt != widget.endsAt) {
+      _lastWarned = null;
+      _tick();
+    }
+  }
+
+  void _tick() {
+    if (!mounted) return;
+    final remaining = widget.endsAt.difference(ref.read(gameSocketServiceProvider).serverNow());
+    final seconds = remaining.isNegative ? 0 : (remaining.inMilliseconds / 1000).ceil();
+    if (seconds > 0 && seconds <= _warnFrom && seconds != _lastWarned) {
+      _lastWarned = seconds;
+      widget.onWarningSecond?.call();
+    }
+    if (seconds != _seconds) setState(() => _seconds = seconds);
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final urgent = _seconds <= _warnFrom;
+    final color = urgent ? const Color(0xFFFF6B6B) : const Color(0xFFFFD54F);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.timer_outlined, size: 13, color: color),
+        const SizedBox(width: 3),
+        Text('${_seconds}s', style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800)),
+      ],
+    );
+  }
 }
