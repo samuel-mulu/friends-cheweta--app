@@ -46,9 +46,14 @@ class MatchHistoryItem {
     this.finishedAt,
     this.settlement,
     this.winnerOrder = const [],
+    this.source,
   });
 
   final String id;
+
+  /// CHALLENGE | REMATCH | INVITE | PRACTICE (free game vs computer).
+  final String? source;
+  bool get isPractice => source == 'PRACTICE';
   final String status;
   final String gameName;
   final String modeName;
@@ -79,6 +84,7 @@ class MatchHistoryItem {
       finishedAt: DateTime.tryParse(json['finishedAt']?.toString() ?? ''),
       settlement: settlementJson is Map ? MatchSettlementSummary.fromJson(Map<String, dynamic>.from(settlementJson)) : null,
       winnerOrder: (json['winnerOrder'] as List? ?? const []).map((e) => e.toString()).toList(),
+      source: json['source']?.toString(),
     );
   }
 

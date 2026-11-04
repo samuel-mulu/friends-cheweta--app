@@ -6,6 +6,7 @@ import 'package:friends_game_app/core/utils/money_formatter.dart';
 import 'package:friends_game_app/core/widgets/app_error_view.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/history/presentation/controllers/match_history_controller.dart';
+import 'package:friends_game_app/features/ludo/application/practice_launcher.dart';
 import 'package:friends_game_app/features/ludo/application/rematch_controller.dart';
 import 'package:friends_game_app/features/wallet/presentation/controllers/wallet_controller.dart';
 
@@ -93,41 +94,54 @@ class _LudoResultScreenState extends ConsumerState<LudoResultScreen> {
                 const SizedBox(height: 6),
                 Text(won ? 'Your result is confirmed by the server.' : 'The server has confirmed the final result.', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 28),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(18),
-                    child: Column(children: [
-                      _ResultRow(label: 'Stake', value: MoneyFormatter.minorToEtb(BigInt.from(match.stakeAmountMinor))),
-                      if (settlement != null) ...[
-                        _ResultRow(label: 'Pot', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.potAmountMinor))),
-                        _ResultRow(label: 'Platform fee', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.platformFeeMinor))),
-                        _ResultRow(label: 'Winner payout', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.payoutAmountMinor))),
-                      ],
-                    ]),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                if (processing)
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(children: [
-                        const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                        const SizedBox(width: 12),
-                        Expanded(child: Text('Result confirmed. Prize settlement is processing…', style: Theme.of(context).textTheme.bodyMedium)),
-                      ]),
+                if (match.isPractice)
+                  const Card(
+                    child: ListTile(
+                      leading: Icon(Icons.smart_toy_outlined),
+                      title: Text('Practice game'),
+                      subtitle: Text('Free game against the computer. No stake, no stats.'),
                     ),
                   )
-                else
+                else ...[
                   Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.verified_rounded),
-                      title: const Text('Settlement complete'),
-                      subtitle: const Text('Wallet and ledger were updated by the backend.'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Column(children: [
+                        _ResultRow(label: 'Stake', value: MoneyFormatter.minorToEtb(BigInt.from(match.stakeAmountMinor))),
+                        if (settlement != null) ...[
+                          _ResultRow(label: 'Pot', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.potAmountMinor))),
+                          _ResultRow(label: 'Platform fee', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.platformFeeMinor))),
+                          _ResultRow(label: 'Winner payout', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.payoutAmountMinor))),
+                        ],
+                      ]),
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  if (processing)
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(children: [
+                          const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                          const SizedBox(width: 12),
+                          Expanded(child: Text('Result confirmed. Prize settlement is processing…', style: Theme.of(context).textTheme.bodyMedium)),
+                        ]),
+                      ),
+                    )
+                  else
+                    const Card(
+                      child: ListTile(
+                        leading: Icon(Icons.verified_rounded),
+                        title: Text('Settlement complete'),
+                        subtitle: Text('Wallet and ledger were updated by the backend.'),
+                      ),
+                    ),
+                ],
                 const SizedBox(height: 24),
-                if (match.status == 'FINISHED' && me != null) ...[
+                if (match.isPractice) ...[
+                  _PlayAgainCard(),
+                  const SizedBox(height: 16),
+                ] else if (match.status == 'FINISHED' && me != null) ...[
                   _RematchCard(me: me),
                   const SizedBox(height: 16),
                 ],
@@ -207,6 +221,28 @@ class _RematchCard extends ConsumerWidget {
             const SizedBox(height: 8),
             Text(state.message!, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
           ],
+        ]),
+      ),
+    );
+  }
+}
+
+/// Practice: start another game against the computer (same level by default).
+class _PlayAgainCard extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final level = ref.watch(lastPracticeLevelProvider);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          FilledButton.icon(
+            onPressed: () => level == null ? showPracticeSheet(context, ref) : startPractice(context, ref, level),
+            icon: const Icon(Icons.replay_rounded),
+            label: Text(level == null ? 'Play again' : 'Play again (${level.label})'),
+          ),
+          if (level != null)
+            TextButton(onPressed: () => showPracticeSheet(context, ref), child: const Text('Change level')),
         ]),
       ),
     );

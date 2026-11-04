@@ -6,6 +6,7 @@ import 'package:friends_game_app/core/utils/money_formatter.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
 import 'package:friends_game_app/features/game_hub/presentation/controllers/game_hub_controller.dart';
 import 'package:friends_game_app/features/live_lobby/presentation/controllers/live_lobby_controller.dart';
+import 'package:friends_game_app/features/ludo/application/practice_launcher.dart';
 import 'package:friends_game_app/features/wallet/presentation/controllers/wallet_controller.dart';
 
 class LudoLobbyScreen extends ConsumerWidget {
@@ -30,6 +31,18 @@ class LudoLobbyScreen extends ConsumerWidget {
           padding: const EdgeInsets.all(AppSpacing.screen),
           children: [
             const _LudoHero(),
+            const SizedBox(height: 16),
+            Card(
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                leading: const CircleAvatar(child: Icon(Icons.smart_toy_outlined)),
+                title: const Text('Practice vs computer', style: TextStyle(fontWeight: FontWeight.w800)),
+                subtitle: const Text('Free • Easy, Normal or Hard'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => showPracticeSheet(context, ref),
+              ),
+            ),
             const SizedBox(height: 24),
             Row(
               children: [
