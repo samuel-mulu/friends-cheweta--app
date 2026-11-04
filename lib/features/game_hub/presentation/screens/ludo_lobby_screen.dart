@@ -5,6 +5,7 @@ import 'package:friends_game_app/core/theme/app_spacing.dart';
 import 'package:friends_game_app/core/utils/money_formatter.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
 import 'package:friends_game_app/features/game_hub/presentation/controllers/game_hub_controller.dart';
+import 'package:friends_game_app/features/live_lobby/presentation/controllers/live_lobby_controller.dart';
 import 'package:friends_game_app/features/wallet/presentation/controllers/wallet_controller.dart';
 
 class LudoLobbyScreen extends ConsumerWidget {
@@ -16,7 +17,13 @@ class LudoLobbyScreen extends ConsumerWidget {
     final wallet = ref.watch(walletControllerProvider).wallet;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Ludo')),
+      appBar: AppBar(title: const Text('Ludo'), actions: [
+        TextButton.icon(
+          onPressed: () => _joinWithCode(context),
+          icon: const Icon(Icons.vpn_key_outlined),
+          label: const Text('Join with code'),
+        ),
+      ]),
       body: RefreshIndicator(
         onRefresh: () => ref.read(gameHubControllerProvider.notifier).load(),
         child: ListView(
@@ -94,6 +101,70 @@ class LudoLobbyScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+Future<void> _joinWithCode(BuildContext context) async {
+  final matchId = await showDialog<String>(context: context, builder: (_) => const _JoinCodeDialog());
+  if (matchId != null && context.mounted) context.go('/ludo/match/$matchId');
+}
+
+/// Enter a friend's invite code; joining creates the match immediately.
+class _JoinCodeDialog extends ConsumerStatefulWidget {
+  const _JoinCodeDialog();
+  @override
+  ConsumerState<_JoinCodeDialog> createState() => _JoinCodeDialogState();
+}
+
+class _JoinCodeDialogState extends ConsumerState<_JoinCodeDialog> {
+  final _code = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _code.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_busy || _code.text.trim().length < 4) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final matchId = await ref.read(liveLobbyControllerProvider.notifier).joinInvite(_code.text);
+      if (mounted) Navigator.pop(context, matchId);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = error is InviteJoinException ? error.message : 'Could not join. Check your connection.';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Join with code'),
+        content: TextField(
+          controller: _code,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          decoration: InputDecoration(hintText: 'ABCDE-FGHJK', errorText: _error),
+          onSubmitted: (_) => _submit(),
+        ),
+        actions: [
+          TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: _busy ? null : _submit,
+            child: _busy
+                ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Join'),
+          ),
+        ],
+      );
 }
 
 class _LudoHero extends StatelessWidget {

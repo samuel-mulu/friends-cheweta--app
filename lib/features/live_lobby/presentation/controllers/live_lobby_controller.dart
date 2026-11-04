@@ -257,6 +257,46 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
   Future<void> reject() => _challengeCommand('challenge:reject');
   Future<void> cancel() => _challengeCommand('challenge:cancel');
 
+  /// Create a shareable invite code for this lobby's mode.
+  Future<void> createInvite() async {
+    final mode = state.mode;
+    if (mode == null || state.busy || state.activeChallenge != null) return;
+    state = state.copyWith(busy: true, clearError: true);
+    try {
+      final ack = await ref.read(gameSocketServiceProvider).emitWithAck('challenge:invite_create', {
+        'commandId': _uuid.v4(),
+        'gameModeId': mode.id,
+      });
+      final data = ack['data'];
+      state = ack['ok'] == true && data is Map
+          ? state.copyWith(busy: false, activeChallenge: LobbyChallenge.fromJson(Map<String, dynamic>.from(data)))
+          : state.copyWith(busy: false, error: _message(ack));
+    } catch (_) {
+      state = state.copyWith(busy: false, error: 'Could not create an invite.');
+    }
+  }
+
+  /// Join a friend's invite by code (works outside the lobby). Returns the
+  /// match id to enter; throws [InviteJoinException] with a readable message.
+  Future<String> joinInvite(String code) async {
+    final ack = await ref.read(gameSocketServiceProvider).emitWithAck('challenge:invite_join', {
+      'commandId': _uuid.v4(),
+      'code': code.trim(),
+    });
+    final data = ack['data'];
+    final matchId = ack['ok'] == true && data is Map
+        ? LobbyChallenge.fromJson(Map<String, dynamic>.from(data)).matchId
+        : null;
+    if (matchId != null) return matchId;
+    throw InviteJoinException(switch (ack['code']?.toString()) {
+      'INVITE_NOT_FOUND' => 'That code does not exist or has expired.',
+      'CHALLENGE_NOT_PENDING' || 'CHALLENGE_EXPIRED' => 'That invite is no longer available.',
+      'INVITE_SELF' => 'This is your own invite code.',
+      'INSUFFICIENT_BALANCE_FOR_MATCH' => 'Your balance is below the stake for this game.',
+      _ => _message(ack),
+    });
+  }
+
   Future<void> sendMessage(String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty || trimmed.length > 160 || state.sendingMessage) return;
@@ -317,7 +357,10 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
   }
 
   void _onEvent(RealtimeEvent event) {
+    // Only meaningful while the lobby screen is open; rematches have their own controller.
+    if (state.mode == null) return;
     final data = event.data;
+    if (event.name.startsWith('challenge:') && data['kind'] == 'REMATCH') return;
     switch (event.name) {
       case 'lobby:player_joined':
       case 'lobby:player_ready':
@@ -342,9 +385,11 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
         break;
       case 'challenge:created':
       case 'challenge:received':
+        final challenge = LobbyChallenge.fromJson(data);
         state = state.copyWith(
-          activeChallenge: LobbyChallenge.fromJson(data),
-          myState: LobbyPlayerState.challenged,
+          activeChallenge: challenge,
+          // An open invite does not change our lobby state on the server.
+          myState: challenge.isInvite ? null : LobbyPlayerState.challenged,
           busy: false,
           clearPendingChallenge: true,
           clearError: true,
@@ -380,8 +425,9 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
       case 'challenge:expired':
         // The server follows with lobby:player_available for every player it
         // returned to READY (including us); until then we are just online.
+        final isInvite = data['kind'] == 'INVITE';
         state = state.copyWith(
-          myState: LobbyPlayerState.online,
+          myState: isInvite ? null : LobbyPlayerState.online,
           busy: false,
           clearPendingChallenge: true,
           clearError: true,
@@ -438,3 +484,10 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
 
 final liveLobbyControllerProvider =
     NotifierProvider<LiveLobbyController, LiveLobbyState>(LiveLobbyController.new);
+
+class InviteJoinException implements Exception {
+  const InviteJoinException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}

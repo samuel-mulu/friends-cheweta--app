@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/core/theme/app_spacing.dart';
@@ -107,7 +108,8 @@ class _LiveLobbyScreenState extends ConsumerState<LiveLobbyScreen> {
                               state: state,
                               stake: stake,
                               onReady: controller.ready,
-                              onUnready: controller.unready),
+                              onUnready: controller.unready,
+                              onInvite: controller.createInvite),
                           const SizedBox(height: 12),
                           SegmentedButton<int>(
                             segments: [
@@ -150,6 +152,7 @@ class _LiveLobbyScreenState extends ConsumerState<LiveLobbyScreen> {
               if (challenge != null)
                 _ChallengePanel(
                   isIncoming: challenge.opponentId == selfId,
+                  inviteCode: challenge.isInvite ? challenge.displayInviteCode : null,
                   title: challenge.challengerName ??
                       challenge.opponentName ??
                       'Player',
@@ -202,11 +205,13 @@ class _MyStatusPanel extends StatelessWidget {
       {required this.state,
       required this.stake,
       required this.onReady,
-      required this.onUnready});
+      required this.onUnready,
+      required this.onInvite});
   final LiveLobbyState state;
   final String stake;
   final VoidCallback onReady;
   final VoidCallback onUnready;
+  final VoidCallback onInvite;
 
   @override
   Widget build(BuildContext context) {
@@ -248,12 +253,20 @@ class _MyStatusPanel extends StatelessWidget {
                 onPressed: state.busy || state.isRecovering ? null : onUnready,
                 child: const Text('Cancel Ready')),
           ]),
+        if (state.activeChallenge == null) ...[
+          const SizedBox(height: 4),
+          TextButton.icon(
+              onPressed: state.busy || state.isRecovering ? null : onInvite,
+              icon: const Icon(Icons.person_add_alt_1_outlined),
+              label: const Text('Invite a friend with a code')),
+        ],
       ]),
     );
   }
 
   String _statusText(LiveLobbyState state) {
     final challenge = state.activeChallenge;
+    if (challenge != null && challenge.isInvite) return 'Waiting for your friend to join…';
     if (challenge != null) {
       final name =
           challenge.challengerName ?? challenge.opponentName ?? 'player';
@@ -440,6 +453,7 @@ class _PlayerTile extends StatelessWidget {
 class _ChallengePanel extends StatefulWidget {
   const _ChallengePanel(
       {required this.isIncoming,
+      this.inviteCode,
       required this.title,
       required this.stake,
       required this.expiresAt,
@@ -448,6 +462,8 @@ class _ChallengePanel extends StatefulWidget {
       required this.onReject,
       required this.onCancel});
   final bool isIncoming;
+  /// Set for an outgoing invite: shown instead of an opponent name.
+  final String? inviteCode;
   final String title;
   final String stake;
   final DateTime expiresAt;
@@ -461,6 +477,41 @@ class _ChallengePanel extends StatefulWidget {
 }
 
 class _ChallengePanelState extends State<_ChallengePanel> {
+  Widget _invite(BuildContext context, String code, String timeText) => Align(
+        alignment: Alignment.bottomCenter,
+        child: Card(
+          margin: const EdgeInsets.all(16),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('Invite a friend', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Text('Share this code. Your friend opens Ludo → Join with code.\nLudo • ${widget.stake} • $timeText'),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(
+                  child: SelectableText(code,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(letterSpacing: 2)),
+                ),
+                IconButton(
+                  tooltip: 'Copy code',
+                  icon: const Icon(Icons.copy_rounded),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: code));
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Code copied')));
+                  },
+                ),
+              ]),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                  onPressed: widget.busy ? null : widget.onCancel,
+                  child: Text(widget.busy ? 'Cancelling…' : 'Cancel invite')),
+            ]),
+          ),
+        ),
+      );
+
   Timer? _timer;
   @override
   void initState() {
@@ -478,9 +529,13 @@ class _ChallengePanelState extends State<_ChallengePanel> {
   Widget build(BuildContext context) {
     final seconds =
         widget.expiresAt.difference(DateTime.now().toUtc()).inSeconds;
-    final timeText = seconds > 0
-        ? 'Expires in ${seconds.clamp(0, 99)}s'
-        : 'Waiting for server…';
+    final timeText = seconds <= 0
+        ? 'Waiting for server…'
+        : seconds >= 60
+            ? 'Expires in ${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}'
+            : 'Expires in ${seconds}s';
+    final code = widget.inviteCode;
+    if (code != null) return _invite(context, code, timeText);
     return Align(
       alignment: Alignment.bottomCenter,
       child: Card(

@@ -6,6 +6,7 @@ import 'package:friends_game_app/core/utils/money_formatter.dart';
 import 'package:friends_game_app/core/widgets/app_error_view.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/history/presentation/controllers/match_history_controller.dart';
+import 'package:friends_game_app/features/ludo/application/rematch_controller.dart';
 import 'package:friends_game_app/features/wallet/presentation/controllers/wallet_controller.dart';
 
 class LudoResultScreen extends ConsumerStatefulWidget {
@@ -23,6 +24,7 @@ class _LudoResultScreenState extends ConsumerState<LudoResultScreen> {
   @override
   void initState() {
     super.initState();
+    Future.microtask(() => ref.read(rematchControllerProvider.notifier).attach(widget.matchId));
     _poller = Timer.periodic(const Duration(seconds: 2), (_) {
       final current = ref.read(matchDetailProvider(widget.matchId)).asData?.value;
       if (current == null || current.status == 'FINISHING') {
@@ -50,6 +52,9 @@ class _LudoResultScreenState extends ConsumerState<LudoResultScreen> {
   Widget build(BuildContext context) {
     final detail = ref.watch(matchDetailProvider(widget.matchId));
     final me = ref.watch(authControllerProvider).user?.id;
+    ref.listen(rematchControllerProvider.select((s) => s.newMatchId), (previous, next) {
+      if (next != null && next != previous) context.go('/ludo/match/$next');
+    });
     return Scaffold(
       appBar: AppBar(automaticallyImplyLeading: false, title: const Text('Match result')),
       body: detail.when(
@@ -122,7 +127,11 @@ class _LudoResultScreenState extends ConsumerState<LudoResultScreen> {
                     ),
                   ),
                 const SizedBox(height: 24),
-                FilledButton.icon(onPressed: () => context.go('/ludo'), icon: const Icon(Icons.replay_rounded), label: const Text('Play again')),
+                if (match.status == 'FINISHED' && me != null) ...[
+                  _RematchCard(me: me),
+                  const SizedBox(height: 16),
+                ],
+                FilledButton.tonalIcon(onPressed: () => context.go('/ludo'), icon: const Icon(Icons.groups_rounded), label: const Text('Find another player')),
                 const SizedBox(height: 10),
                 OutlinedButton(onPressed: () => context.go('/home'), child: const Text('Back to home')),
                 const SizedBox(height: 10),
@@ -145,4 +154,61 @@ class _ResultRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 7),
         child: Row(children: [Expanded(child: Text(label)), Text(value, style: Theme.of(context).textTheme.labelLarge)]),
       );
+}
+
+/// Offer / answer a rematch with the same opponent and stake.
+class _RematchCard extends ConsumerWidget {
+  const _RematchCard({required this.me});
+  final String me;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(rematchControllerProvider);
+    final controller = ref.read(rematchControllerProvider.notifier);
+    final offer = state.offer;
+    final incoming = offer != null && offer.opponentId == me;
+    final opponent = offer == null ? null : (incoming ? offer.challengerName : offer.opponentName) ?? 'Your opponent';
+
+    final Widget body;
+    if (offer == null) {
+      body = FilledButton.icon(
+        onPressed: state.busy ? null : controller.request,
+        icon: const Icon(Icons.replay_rounded),
+        label: const Text('Rematch'),
+      );
+    } else if (incoming) {
+      body = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('$opponent wants a rematch.', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: OutlinedButton(onPressed: state.busy ? null : controller.decline, child: const Text('Decline'))),
+          const SizedBox(width: 8),
+          Expanded(child: FilledButton(onPressed: state.busy ? null : controller.accept, child: const Text('Accept'))),
+        ]),
+      ]);
+    } else {
+      body = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(width: 12),
+          Expanded(child: Text('Waiting for $opponent to accept…')),
+        ]),
+        const SizedBox(height: 10),
+        OutlinedButton(onPressed: state.busy ? null : controller.cancel, child: const Text('Cancel rematch')),
+      ]);
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          body,
+          if (state.message != null) ...[
+            const SizedBox(height: 8),
+            Text(state.message!, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ]),
+      ),
+    );
+  }
 }

@@ -1,41 +1,12 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'support/fake_socket.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/core/socket/realtime_event.dart';
-import 'package:friends_game_app/features/auth/domain/auth_state.dart';
-import 'package:friends_game_app/features/auth/domain/user.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
 import 'package:friends_game_app/features/live_lobby/domain/lobby_player.dart';
 import 'package:friends_game_app/features/live_lobby/presentation/controllers/live_lobby_controller.dart';
-
-class _FakeSocket extends Fake implements GameSocketService {
-  final events$ = StreamController<RealtimeEvent>.broadcast();
-  final statuses$ = StreamController<GameSocketStatus>.broadcast();
-  final sent = <String>[];
-  Map<String, dynamic> Function(String event, Map<String, dynamic> payload) reply =
-      (_, __) => {'ok': true};
-
-  @override
-  Stream<RealtimeEvent> get events => events$.stream;
-  @override
-  Stream<GameSocketStatus> get statuses => statuses$.stream;
-  @override
-  Future<Map<String, dynamic>> emitWithAck(String event, [Map<String, dynamic> payload = const {}]) async {
-    sent.add(event);
-    return reply(event, payload);
-  }
-}
-
-class _SignedIn extends AuthController {
-  @override
-  AuthState build() => const AuthState(
-        status: AuthStatus.authenticated,
-        user: User(id: 'me', fullName: 'Me', phoneNumber: '0', role: 'PLAYER', status: 'ACTIVE'),
-      );
-}
 
 const _mode = GameMode(
   id: 'mode-1',
@@ -51,19 +22,17 @@ const _mode = GameMode(
 );
 
 void main() {
-  late _FakeSocket socket;
+  late FakeSocket socket;
   late ProviderContainer container;
 
   setUp(() {
-    socket = _FakeSocket();
+    socket = FakeSocket();
     container = ProviderContainer(overrides: [
       gameSocketServiceProvider.overrideWithValue(socket),
-      authControllerProvider.overrideWith(_SignedIn.new),
+      authControllerProvider.overrideWith(SignedInAs.new),
     ]);
   });
   tearDown(() => container.dispose());
-
-  Future<void> flush() => Future<void>.delayed(Duration.zero);
 
   test('after leaving, a socket reconnect does not rejoin the lobby (no ghost presence)', () async {
     final lobby = container.read(liveLobbyControllerProvider.notifier);
@@ -123,5 +92,42 @@ void main() {
     }));
     await flush();
     expect(container.read(liveLobbyControllerProvider).myState, LobbyPlayerState.ready);
+  });
+
+  test('invite: creating shows the code; joining returns the match to enter', () async {
+    final lobby = container.read(liveLobbyControllerProvider.notifier);
+    await lobby.join(_mode);
+    socket.reply = (event, _) => switch (event) {
+          'challenge:invite_create' => {
+              'ok': true,
+              'data': {'id': 'inv', 'kind': 'INVITE', 'challengerId': 'me', 'opponentId': '', 'inviteCode': 'ABCDEFGHJK'},
+            },
+          'challenge:invite_join' => {
+              'ok': true,
+              'data': {'id': 'inv', 'status': 'ACCEPTED', 'match': {'id': 'm-inv'}},
+            },
+          _ => {'ok': true},
+        };
+
+    await lobby.createInvite();
+    final state = container.read(liveLobbyControllerProvider);
+    expect(state.activeChallenge?.displayInviteCode, 'ABCDE-FGHJK');
+    expect(state.myState, isNot(LobbyPlayerState.challenged));
+
+    expect(await lobby.joinInvite('abcde-fghjk'), 'm-inv');
+  });
+
+  test('invite: a bad code surfaces a readable error', () async {
+    socket.reply = (_, __) => {'ok': false, 'code': 'INVITE_NOT_FOUND'};
+    final lobby = container.read(liveLobbyControllerProvider.notifier);
+    expect(() => lobby.joinInvite('nope1'), throwsA(isA<InviteJoinException>()));
+  });
+
+  test('rematch events are ignored by the lobby', () async {
+    final lobby = container.read(liveLobbyControllerProvider.notifier);
+    await lobby.join(_mode);
+    socket.push('challenge:received', {'id': 'r1', 'kind': 'REMATCH', 'challengerId': 'other', 'opponentId': 'me'});
+    await flush();
+    expect(container.read(liveLobbyControllerProvider).activeChallenge, isNull);
   });
 }
