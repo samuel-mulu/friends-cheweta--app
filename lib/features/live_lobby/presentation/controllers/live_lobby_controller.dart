@@ -238,7 +238,8 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
   }
 
   Future<void> challenge(LobbyPlayer player) async {
-    if (!state.isReady || !player.isReady || state.busy) return;
+    // Being ONLINE is enough: the server readies the challenger in the same step.
+    if (!player.isReady || state.busy || state.activeChallenge != null || state.isChallenged) return;
     state = state.copyWith(busy: true, pendingChallengeUserId: player.userId, clearError: true);
     try {
       final ack = await ref.read(gameSocketServiceProvider).emitWithAck('challenge:create', {
@@ -297,9 +298,10 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
     });
   }
 
-  Future<void> sendMessage(String text) async {
+  /// True when the server accepted the message.
+  Future<bool> sendMessage(String text) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty || trimmed.length > 160 || state.sendingMessage) return;
+    if (trimmed.isEmpty || trimmed.length > 160 || state.sendingMessage) return false;
     state = state.copyWith(sendingMessage: true, clearError: true);
     try {
       final ack = await ref.read(gameSocketServiceProvider).emitWithAck('lobby:chat:send', {
@@ -311,8 +313,10 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
         error: ack['ok'] == true ? null : _message(ack),
         clearError: ack['ok'] == true,
       );
+      return ack['ok'] == true;
     } catch (_) {
       state = state.copyWith(sendingMessage: false, error: 'Could not send message.');
+      return false;
     }
   }
 

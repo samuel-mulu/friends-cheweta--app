@@ -8,7 +8,7 @@ import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/core/theme/app_theme.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/chat/application/match_chat_controller.dart';
-import 'package:friends_game_app/features/chat/domain/chat_message.dart';
+import 'package:friends_game_app/features/chat/presentation/widgets/chat_thread.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_feedback.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
@@ -751,110 +751,50 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-class _MatchChatSheet extends ConsumerStatefulWidget {
+class _MatchChatSheet extends ConsumerWidget {
   const _MatchChatSheet();
 
   @override
-  ConsumerState<_MatchChatSheet> createState() => _MatchChatSheetState();
-}
-
-class _MatchChatSheetState extends ConsumerState<_MatchChatSheet> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final chat = ref.watch(matchChatControllerProvider);
-    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final me = ref.watch(authControllerProvider.select((auth) => auth.user?.id));
     return Padding(
-      padding: EdgeInsets.only(bottom: bottom),
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       child: SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.58,
+        height: MediaQuery.sizeOf(context).height * 0.6,
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
               child: Row(children: [
-                Expanded(child: Text('Match Chat', style: Theme.of(context).textTheme.titleMedium)),
+                Expanded(child: Text('Match chat', style: Theme.of(context).textTheme.titleMedium)),
                 IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
               ]),
             ),
-            if (chat.error != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text(chat.error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-              ),
             Expanded(
-              child: chat.loading
+              child: chat.loading && chat.messages.isEmpty
                   ? const Center(child: CircularProgressIndicator())
-                  : chat.messages.isEmpty
-                      ? const Center(child: Text('No match messages yet.'))
-                      : ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          itemCount: chat.messages.length,
-                          itemBuilder: (context, index) => _ChatLine(message: chat.messages[index]),
-                        ),
-            ),
-            SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: Row(children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      maxLength: 160,
-                      minLines: 1,
-                      maxLines: 3,
-                      decoration: const InputDecoration(hintText: 'Message...', counterText: ''),
-                      onSubmitted: (_) => _send(chat.sending),
+                  : ChatThread(
+                      lines: [
+                        for (final m in chat.messages)
+                          ChatLine(
+                            id: m.id,
+                            text: m.text,
+                            senderName: m.sender.displayName,
+                            mine: m.sender.userId == me,
+                            createdAt: m.createdAt,
+                          ),
+                      ],
+                      sending: chat.sending,
+                      error: chat.error,
+                      emptyText: 'Say good luck 👋',
+                      onSend: ref.read(matchChatControllerProvider.notifier).send,
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    onPressed: chat.sending ? null : () => _send(false),
-                    icon: chat.sending
-                        ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.send_rounded),
-                  ),
-                ]),
-              ),
             ),
           ],
         ),
       ),
     );
-  }
-
-  void _send(bool sending) {
-    if (sending) return;
-    final text = _controller.text;
-    _controller.clear();
-    ref.read(matchChatControllerProvider.notifier).send(text);
-  }
-}
-
-class _ChatLine extends StatelessWidget {
-  const _ChatLine({required this.message});
-  final ChatMessage message;
-
-  @override
-  Widget build(BuildContext context) => ListTile(
-        dense: true,
-        contentPadding: EdgeInsets.zero,
-        title: Text(message.sender.displayName, style: Theme.of(context).textTheme.labelLarge),
-        subtitle: Text(message.text),
-        trailing: Text(_time(message.createdAt), style: Theme.of(context).textTheme.labelSmall),
-      );
-
-  String _time(DateTime value) {
-    final local = value.toLocal();
-    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
   }
 }
 

@@ -13,6 +13,8 @@ import 'package:friends_game_app/features/history/presentation/screens/history_s
 import 'package:friends_game_app/features/history/presentation/screens/match_detail_screen.dart';
 import 'package:friends_game_app/features/history/presentation/screens/match_replay_screen.dart';
 import 'package:friends_game_app/features/home/presentation/screens/home_screen.dart';
+import 'package:friends_game_app/features/chat/presentation/screens/chats_screen.dart';
+import 'package:friends_game_app/features/chat/presentation/screens/direct_chat_screen.dart';
 import 'package:friends_game_app/features/ludo/presentation/screens/ludo_match_screen.dart';
 import 'package:friends_game_app/features/ludo/presentation/screens/ludo_result_screen.dart';
 import 'package:friends_game_app/features/live_lobby/presentation/screens/live_lobby_screen.dart';
@@ -53,6 +55,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/deposit', builder: (_, __) => const DepositScreen()),
       GoRoute(path: '/withdraw', builder: (_, __) => const WithdrawalScreen()),
       GoRoute(path: '/games', builder: (_, __) => const GameHubScreen()),
+      GoRoute(path: '/chats', builder: (_, __) => const ChatsScreen()),
+      GoRoute(
+        path: '/chats/:userId',
+        builder: (_, state) => DirectChatScreen(
+          peerId: state.pathParameters['userId'] ?? '',
+          peerName: state.extra is String ? state.extra as String : null,
+        ),
+      ),
       GoRoute(path: '/ludo', builder: (_, __) => const LudoLobbyScreen()),
       GoRoute(
         path: '/ludo/matchmaking',

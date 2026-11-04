@@ -15,6 +15,8 @@ const _forwardedServerEvents = <String>[
   'lobby:player_busy',
   'lobby:player_available',
   'lobby:chat:message',
+  'chat:direct:message',
+  'chat:direct:read',
   'challenge:created',
   'challenge:received',
   'challenge:accepted',

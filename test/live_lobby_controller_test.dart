@@ -130,4 +130,15 @@ void main() {
     await flush();
     expect(container.read(liveLobbyControllerProvider).activeChallenge, isNull);
   });
+
+  test('Connect works while I am only online (server readies me in the same step)', () async {
+    final lobby = container.read(liveLobbyControllerProvider.notifier);
+    await lobby.join(_mode);
+    expect(container.read(liveLobbyControllerProvider).myState, LobbyPlayerState.online);
+    socket.sent.clear();
+
+    await lobby.challenge(const LobbyPlayer(userId: 'sam', displayName: 'Sam', state: LobbyPlayerState.ready));
+
+    expect(socket.sent, ['challenge:create']);
+  });
 }

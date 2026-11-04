@@ -81,10 +81,11 @@ class MatchChatController extends Notifier<MatchChatState> {
     }
   }
 
-  Future<void> send(String text) async {
+  /// True when the server accepted the message.
+  Future<bool> send(String text) async {
     final matchId = state.matchId;
     final trimmed = text.trim();
-    if (matchId == null || trimmed.isEmpty || trimmed.length > 160 || state.sending) return;
+    if (matchId == null || trimmed.isEmpty || trimmed.length > 160 || state.sending) return false;
     state = state.copyWith(sending: true, clearError: true);
     try {
       final ack = await ref.read(gameSocketServiceProvider).emitWithAck('match:chat:send', {
@@ -93,8 +94,10 @@ class MatchChatController extends Notifier<MatchChatState> {
         'text': trimmed,
       });
       state = state.copyWith(sending: false, error: ack['ok'] == true ? null : _message(ack), clearError: ack['ok'] == true);
+      return ack['ok'] == true;
     } catch (_) {
       state = state.copyWith(sending: false, error: 'Could not send message.');
+      return false;
     }
   }
 

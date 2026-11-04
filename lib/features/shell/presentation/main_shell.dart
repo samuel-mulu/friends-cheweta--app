@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:friends_game_app/features/chat/presentation/widgets/messages_button.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/features/shell/presentation/widgets/app_sidebar.dart';
@@ -37,6 +38,7 @@ class MainShell extends ConsumerWidget {
           appBar: AppBar(
             title: Text(_titleForIndex(navigationShell.currentIndex)),
             centerTitle: false,
+            actions: const [MessagesButton(), SizedBox(width: 4)],
           ),
           drawer: Drawer(
             width: AppSidebar.width,

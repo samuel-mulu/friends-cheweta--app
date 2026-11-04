@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/core/theme/app_spacing.dart';
 import 'package:friends_game_app/core/utils/money_formatter.dart';
-import 'package:friends_game_app/features/chat/domain/chat_message.dart';
+import 'package:friends_game_app/features/chat/presentation/widgets/chat_thread.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
 import 'package:friends_game_app/features/live_lobby/domain/lobby_player.dart';
 import 'package:friends_game_app/features/live_lobby/presentation/controllers/live_lobby_controller.dart';
@@ -21,7 +21,6 @@ class LiveLobbyScreen extends ConsumerStatefulWidget {
 
 class _LiveLobbyScreenState extends ConsumerState<LiveLobbyScreen> {
   int _tab = 0;
-  final _messageController = TextEditingController();
   late final LiveLobbyController _lobby;
 
   @override
@@ -33,7 +32,6 @@ class _LiveLobbyScreenState extends ConsumerState<LiveLobbyScreen> {
 
   @override
   void dispose() {
-    _messageController.dispose();
     // Lobby membership lives exactly as long as this screen (also on the way
     // into a match; the server already removed us then, so this is a no-op).
     Future.microtask(_lobby.leave);
@@ -136,15 +134,20 @@ class _LiveLobbyScreenState extends ConsumerState<LiveLobbyScreen> {
                   Expanded(
                     child: _tab == 0
                         ? _PlayersTab(state: state, controller: controller)
-                        : _LobbyChatTab(
-                            messages: state.messages,
+                        : ChatThread(
+                            lines: [
+                              for (final m in state.messages)
+                                ChatLine(
+                                  id: m.id,
+                                  text: m.text,
+                                  senderName: m.sender.displayName,
+                                  mine: m.sender.userId == state.currentUserId,
+                                  createdAt: m.createdAt,
+                                ),
+                            ],
                             sending: state.sendingMessage,
-                            controller: _messageController,
-                            onSend: () {
-                              final text = _messageController.text;
-                              _messageController.clear();
-                              controller.sendMessage(text);
-                            },
+                            emptyText: 'No messages yet. Say good luck 👋',
+                            onSend: controller.sendMessage,
                           ),
                   ),
                 ],
@@ -306,12 +309,14 @@ class _PlayersTab extends StatelessWidget {
           ...state.orderedPlayers.map((player) => _PlayerTile(
                 player: player,
                 connecting: state.pendingChallengeUserId == player.userId,
-                canConnect: state.myState == LobbyPlayerState.ready &&
+                // Not being ready yet is fine: Connect readies you too.
+                canConnect: state.myState != LobbyPlayerState.challenged &&
                     player.state == LobbyPlayerState.ready &&
                     state.activeChallenge == null &&
                     !state.busy &&
                     !state.isRecovering,
                 onConnect: () => controller.challenge(player),
+                onMessage: () => context.push('/chats/${player.userId}', extra: player.displayName),
               )),
       ],
     );
@@ -331,92 +336,18 @@ class _EmptyPlayers extends StatelessWidget {
       );
 }
 
-class _LobbyChatTab extends StatelessWidget {
-  const _LobbyChatTab(
-      {required this.messages,
-      required this.sending,
-      required this.controller,
-      required this.onSend});
-  final List<ChatMessage> messages;
-  final bool sending;
-  final TextEditingController controller;
-  final VoidCallback onSend;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Expanded(
-          child: messages.isEmpty
-              ? const Center(child: Text('No messages yet. Say good luck 👋'))
-              : ListView.builder(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: AppSpacing.screen),
-                  itemCount: messages.length,
-                  itemBuilder: (context, index) {
-                    final message = messages[index];
-                    return ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(message.sender.displayName,
-                          style: Theme.of(context).textTheme.labelLarge),
-                      subtitle: Text(message.text),
-                      trailing: Text(_time(message.createdAt),
-                          style: Theme.of(context).textTheme.labelSmall),
-                    );
-                  },
-                ),
-        ),
-        SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppSpacing.screen, 8, AppSpacing.screen, AppSpacing.screen),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: controller,
-                    maxLength: 160,
-                    minLines: 1,
-                    maxLines: 3,
-                    decoration: const InputDecoration(
-                        hintText: 'Message...', counterText: ''),
-                    onSubmitted: (_) => sending ? null : onSend(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                    onPressed: sending ? null : onSend,
-                    icon: sending
-                        ? const SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.send_rounded)),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _time(DateTime value) {
-    final local = value.toLocal();
-    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-  }
-}
-
 class _PlayerTile extends StatelessWidget {
   const _PlayerTile(
       {required this.player,
       required this.canConnect,
       required this.connecting,
-      required this.onConnect});
+      required this.onConnect,
+      required this.onMessage});
   final LobbyPlayer player;
   final bool canConnect;
   final bool connecting;
   final VoidCallback onConnect;
+  final VoidCallback onMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -433,12 +364,29 @@ class _PlayerTile extends StatelessWidget {
         title: Text(player.displayName,
             maxLines: 1, overflow: TextOverflow.ellipsis),
         subtitle: Text(_status(player.state)),
-        trailing: player.state == LobbyPlayerState.ready
-            ? FilledButton(
-                onPressed: canConnect ? onConnect : null,
-                child: Text(connecting ? 'Connecting…' : 'Connect'))
-            : Text(_status(player.state),
-                style: Theme.of(context).textTheme.labelMedium),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: 'Message ${player.displayName}',
+              onPressed: onMessage,
+              icon: const Icon(Icons.chat_bubble_outline_rounded),
+            ),
+            if (player.state == LobbyPlayerState.ready)
+              FilledButton(
+                onPressed: canConnect && !connecting ? onConnect : null,
+                child: connecting
+                    ? const Row(mainAxisSize: MainAxisSize.min, children: [
+                        SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                        SizedBox(width: 8),
+                        Text('Sending…'),
+                      ])
+                    : const Text('Connect'),
+              )
+            else
+              Text(_status(player.state), style: Theme.of(context).textTheme.labelMedium),
+          ],
+        ),
       ),
     );
   }
