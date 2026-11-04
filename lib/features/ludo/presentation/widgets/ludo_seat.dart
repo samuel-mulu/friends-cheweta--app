@@ -26,6 +26,8 @@ class LudoSeatView {
     this.recentRolls = const [],
     this.strikes = 0,
     this.maxStrikes = 3,
+    this.reaction,
+    this.reactionSeq = 0,
     this.onRoll,
   });
 
@@ -51,6 +53,10 @@ class LudoSeatView {
   /// Consecutive turn timeouts ("away strikes"); forfeit at [maxStrikes].
   final int strikes;
   final int maxStrikes;
+
+  /// Phrase or emoji this player just sent (shown briefly above the avatar).
+  final String? reaction;
+  final int reactionSeq;
   final VoidCallback? onRoll;
 
   LudoColor get color => participant.color ?? LudoColor.red;
@@ -197,6 +203,13 @@ class _AvatarCard extends StatelessWidget {
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: size * 0.36),
           ),
         ),
+        if (seat.reaction != null)
+          Positioned(
+            bottom: size - 4,
+            left: -20,
+            right: -20,
+            child: Center(child: _ReactionBubble(key: ValueKey(seat.reactionSeq), text: seat.reaction!)),
+          ),
         if (seat.rank != null)
           Positioned(
             right: -6,
@@ -218,6 +231,40 @@ class _AvatarCard extends StatelessWidget {
     final parts = name.trim().split(RegExp(r'\s+')).where((part) => part.isNotEmpty).toList();
     if (parts.isEmpty) return '?';
     return (parts.first[0] + (parts.length > 1 ? parts.last[0] : '')).toUpperCase();
+  }
+}
+
+/// Pops in above the avatar (emoji large, phrases as a small speech bubble).
+class _ReactionBubble extends StatelessWidget {
+  const _ReactionBubble({super.key, required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final emoji = text.runes.length <= 2 && !RegExp(r'[A-Za-z]').hasMatch(text);
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.4, end: 1),
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutBack,
+      builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: emoji ? 6 : 10, vertical: emoji ? 2 : 5),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8)],
+        ),
+        child: Text(
+          text,
+          maxLines: 1,
+          style: TextStyle(
+            fontSize: emoji ? 22 : 12,
+            fontWeight: FontWeight.w800,
+            color: const Color(0xFF16202E),
+          ),
+        ),
+      ),
+    );
   }
 }
 

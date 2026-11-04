@@ -12,6 +12,7 @@ import 'package:friends_game_app/features/chat/presentation/widgets/chat_thread.
 import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_feedback.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
+import 'package:friends_game_app/features/ludo/application/match_reactions_controller.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_seats.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
@@ -56,6 +57,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     ref.read(gameSoundServiceProvider).preload();
     Future.microtask(() => ref.read(ludoMatchControllerProvider.notifier).join(widget.matchId));
     Future.microtask(() => ref.read(matchChatControllerProvider.notifier).load(widget.matchId));
+    Future.microtask(() => ref.read(matchReactionsProvider.notifier).attach(widget.matchId));
   }
 
   @override
@@ -132,6 +134,11 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
   @override
   Widget build(BuildContext context) {
     ref.listen(ludoAnimationQueueProvider, _onPresentation);
+    ref.listen(matchReactionsProvider, (previous, next) {
+      final me = ref.read(authControllerProvider).user?.id;
+      final fresh = next.entries.any((e) => e.key != me && previous?[e.key]?.seq != e.value.seq);
+      if (fresh) ref.read(gameSoundServiceProvider).play(GameSound.safe, volume: 0.45);
+    });
     ref.listen(ludoMatchControllerProvider.select((s) => s.autoPlayNotice), (previous, next) {
       if (next == null || next.seq == previous?.seq) return;
       final me = ref.read(authControllerProvider).user?.id;
@@ -156,6 +163,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     final socket = ref.watch(gameSocketStatusProvider);
     final animation = ref.watch(ludoAnimationQueueProvider);
     final chat = ref.watch(matchChatControllerProvider);
+    ref.watch(matchReactionsProvider); // seats show live reactions
     final prefs = ref.watch(playerPreferencesProvider);
     final soundOn = prefs.soundEnabled;
     final snapshot = match.snapshot;
@@ -242,6 +250,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                     recovering: match.recovering,
                     onExit: () => _confirmExit(context, game),
                     onChat: () => _openChat(context),
+                    onReact: () => _openReactions(context),
                     onToggleSound: () => ref.read(playerPreferencesProvider.notifier).setSound(!soundOn),
                     onMenu: () => _openMenu(context, match),
                   ),
@@ -375,6 +384,8 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       resigned: resigned,
       recentRolls: _rollHistory[userId] ?? const [],
       strikes: match.strikes[userId] ?? 0,
+      reaction: ref.read(matchReactionsProvider)[userId]?.reaction.display,
+      reactionSeq: ref.read(matchReactionsProvider)[userId]?.seq ?? 0,
       maxStrikes: match.maxStrikes,
       onRoll: canStartRoll || canRoll ? () => _rollMine(startRoll: canStartRoll) : null,
     );
@@ -525,6 +536,31 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       ),
     );
     if (confirmed == true) await ref.read(ludoMatchControllerProvider.notifier).resign();
+  }
+
+  Future<void> _openReactions(BuildContext context) async {
+    final reaction = await showModalBottomSheet<MatchReaction>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              for (final r in MatchReaction.values)
+                ActionChip(
+                  label: Text(r.display, style: TextStyle(fontSize: r.isEmoji ? 22 : 14, fontWeight: FontWeight.w700)),
+                  onPressed: () => Navigator.pop(context, r),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (reaction != null) await ref.read(matchReactionsProvider.notifier).send(reaction);
   }
 
   Future<void> _openChat(BuildContext context) async {
@@ -746,6 +782,7 @@ class _TopBar extends StatelessWidget {
     required this.recovering,
     required this.onExit,
     required this.onChat,
+    required this.onReact,
     required this.onToggleSound,
     required this.onMenu,
   });
@@ -755,6 +792,7 @@ class _TopBar extends StatelessWidget {
   final bool recovering;
   final VoidCallback onExit;
   final VoidCallback onChat;
+  final VoidCallback onReact;
   final VoidCallback onToggleSound;
   final VoidCallback onMenu;
 
@@ -789,6 +827,12 @@ class _TopBar extends StatelessWidget {
           onTap: onToggleSound,
           tooltip: soundOn ? 'Mute sounds' : 'Unmute sounds',
           child: Icon(soundOn ? Icons.volume_up_rounded : Icons.volume_off_rounded, size: 18, color: Colors.white),
+        ),
+        const SizedBox(width: 8),
+        pill(
+          onTap: onReact,
+          tooltip: 'Reactions',
+          child: const Icon(Icons.emoji_emotions_outlined, size: 18, color: Colors.white),
         ),
         const SizedBox(width: 8),
         pill(

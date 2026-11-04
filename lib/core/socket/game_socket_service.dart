@@ -26,6 +26,7 @@ const _forwardedServerEvents = <String>[
   'match:started',
   'match:ready',
   'match:chat:message',
+  'match:reaction',
   'match:finished',
   'match:cancelled',
   'ludo:starting_roll',
