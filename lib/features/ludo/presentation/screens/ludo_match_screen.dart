@@ -8,17 +8,19 @@ import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/core/theme/app_theme.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/chat/application/match_chat_controller.dart';
-import 'package:friends_game_app/features/chat/presentation/widgets/chat_thread.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_feedback.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
 import 'package:friends_game_app/features/ludo/application/match_reactions_controller.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_seats.dart';
-import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
+import 'package:friends_game_app/features/ludo/presentation/match_presenter.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board.dart';
-import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board_geometry.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_seat.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/match_chat_sheet.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/match_chrome.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/table_backdrop.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/turn_banner.dart';
 import 'package:friends_game_app/features/profile/presentation/controllers/preferences_controller.dart';
 
 /// In-match screen. Layout works for 2, 3 or 4 players: the board is rotated
@@ -78,22 +80,8 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     super.dispose();
   }
 
-  /// The board was tapped where nothing can act: say why.
-  void _explainTap(LudoGameState game, String? me, {required bool connected, required bool blocked}) {
-    final String? text;
-    if (!connected) {
-      text = 'Reconnecting…';
-    } else if (blocked || game.phase == LudoMatchPhase.finished) {
-      text = null; // something is animating; the hint returns right after
-    } else if (game.phase == LudoMatchPhase.preGame) {
-      text = 'Tap your dice to roll';
-    } else if (game.currentPlayerId != me) {
-      text = 'Wait for your turn';
-    } else if (game.turnPhase == LudoTurnPhase.waitingForRoll) {
-      text = 'Roll your dice first';
-    } else {
-      text = 'Tap a glowing token';
-    }
+  /// The board was tapped where nothing can act: say why (never fail silently).
+  void _explainTap(String? text) {
     if (text == null) return;
     _tick();
     _nudgeTimer?.cancel();
@@ -229,39 +217,25 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     }
 
     final game = snapshot.game;
-    final participants = _participants(match.participants, snapshot);
-    final myColor = participants.where((p) => p.userId == me).firstOrNull?.color;
-    final orientation = LudoBoardOrientation.forViewer(myColor);
-    final actionsAllowed = match.pendingCommandId == null && !match.recovering && socket == GameSocketStatus.connected;
-    final presenting = animation.busy;
-    final blocked = animation.blocking;
-    final connected = socket == GameSocketStatus.connected && !match.recovering;
-    final seats = [
-      for (final participant in participants)
-        _seatFor(
-          participant: participant,
-          snapshot: snapshot,
-          match: match,
-          me: me,
-          orientation: orientation,
-          actionsAllowed: actionsAllowed,
-          animation: animation,
-        ),
-    ];
-    LudoSeatView? seatAt(LudoCorner corner) => seats.where((seat) => seat.corner == corner).firstOrNull;
-
-    final tokens = _buildTokens(
-      game: game,
+    final view = MatchPresenter(
+      match: match,
       me: me,
-      // Wait for dice/move animations before inviting a move, so a highlighted
-      // token never appears before its dice has landed.
-      actionsAllowed: actionsAllowed && !blocked,
-      animation: animation.current,
+      animation: animation,
+      connected: socket == GameSocketStatus.connected,
       pendingTokenId: _pendingTokenId,
     );
-
-    final banner = _banner(game, snapshot, me, participants);
-    final hint = _nudge ?? _hint(game, me, blocked);
+    final seats = view.seats(
+      SeatPresentation(
+        presentedDice: _presentedDice,
+        diceKeys: _diceKeys,
+        rollHistory: _rollHistory,
+        reactions: ref.read(matchReactionsProvider),
+        mySpin: _mySpin,
+      ),
+      onRoll: (startRoll) => _rollMine(startRoll: startRoll),
+    );
+    LudoSeatView? seatAt(LudoCorner corner) => seats.where((seat) => seat.corner == corner).firstOrNull;
+    final hint = _nudge ?? view.hint;
 
     // The match is always presented on the dark game table, regardless of the
     // app theme, like a dedicated game screen.
@@ -271,12 +245,12 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
         backgroundColor: const Color(0xFF0B1530),
         body: Stack(
           children: [
-            const Positioned.fill(child: RepaintBoundary(child: CustomPaint(painter: _TableBackdrop()))),
+            const Positioned.fill(child: RepaintBoundary(child: CustomPaint(painter: TableBackdrop()))),
             SafeArea(
               child: Column(
                 children: [
-                  _ConnectionBanner(status: socket, recovering: match.recovering),
-                  _TopBar(
+                  MatchConnectionBanner(status: socket, recovering: match.recovering),
+                  MatchTopBar(
                     unread: chat.unread,
                     soundOn: soundOn,
                     recovering: match.recovering,
@@ -291,26 +265,25 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       child: Column(
                         children: [
-                          _SeatRow(left: seatAt(LudoCorner.topLeft), right: seatAt(LudoCorner.topRight)),
+                          LudoSeatRow(left: seatAt(LudoCorner.topLeft), right: seatAt(LudoCorner.topRight)),
                           const SizedBox(height: 6),
-                          _TurnBanner(banner: banner),
+                          TurnBanner(banner: view.banner),
                           const SizedBox(height: 8),
                           Expanded(
                             child: Center(
                               child: LudoBoard(
-                                tokens: tokens,
-                                orientation: orientation,
-                                animatedMove:
-                                    animation.current?.kind == LudoPresentationKind.move ? animation.current?.move : null,
+                                tokens: view.tokens(onMove: _moveToken),
+                                orientation: view.orientation,
+                                animatedMove: view.walkingMove,
                                 animationSequence: animation.sequence,
                                 onStep: () => ref.read(gameSoundServiceProvider).play(GameSound.step, volume: 0.5),
-                                ghosts: _ghosts(match, game, me, myColor, actionsAllowed && !blocked),
-                                onBoardTap: () => _explainTap(game, me, connected: connected, blocked: blocked),
+                                ghosts: view.ghosts(onMove: _moveToken),
+                                onBoardTap: () => _explainTap(view.tapExplanation),
                               ),
                             ),
                           ),
                           const SizedBox(height: 8),
-                          _SeatRow(
+                          LudoSeatRow(
                             left: seatAt(LudoCorner.bottomLeft),
                             right: seatAt(LudoCorner.bottomRight),
                             onWarningSecond: () => ref.read(gameSoundServiceProvider).play(GameSound.tick, volume: 0.6),
@@ -323,7 +296,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      if (match.error != null) _InlineMessage(message: match.error!),
+                      if (match.error != null) MatchInlineMessage(message: match.error!),
                       SizedBox(
                         height: 20,
                         child: AnimatedSwitcher(
@@ -335,7 +308,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                           ),
                         ),
                       ),
-                      if (game.phase == LudoMatchPhase.finished && !presenting) ...[
+                      if (game.phase == LudoMatchPhase.finished && !animation.busy) ...[
                         const SizedBox(height: 8),
                         FilledButton.icon(
                           onPressed: () => context.pushReplacement('/ludo/result/${widget.matchId}'),
@@ -352,183 +325,6 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
         ),
       ),
     );
-  }
-
-  LudoSeatView _seatFor({
-    required LudoMatchParticipant participant,
-    required LudoRuntimeSnapshot snapshot,
-    required LudoMatchViewState match,
-    required String? me,
-    required LudoBoardOrientation orientation,
-    required bool actionsAllowed,
-    required LudoAnimationState animation,
-  }) {
-    final game = snapshot.game;
-    final userId = participant.userId;
-    final isMe = userId == me;
-    final preGame = game.phase == LudoMatchPhase.preGame;
-    final startRolled = snapshot.startingRoll.rolls.containsKey(userId);
-    final startCandidate = snapshot.startingRoll.candidatePlayerIds.contains(userId);
-    final active = preGame ? startCandidate && !startRolled : game.currentPlayerId == userId && game.phase == LudoMatchPhase.playing;
-    final resigned = snapshot.resignedPlayerIds.contains(userId);
-    final rankIndex = game.winnerOrder.indexOf(userId);
-
-    final canStartRoll = isMe && preGame && game.turnPhase == LudoTurnPhase.startRoll && startCandidate && !startRolled;
-    final canRoll = isMe && !preGame && active && game.turnPhase == LudoTurnPhase.waitingForRoll;
-    final rollingNow = animation.current?.kind == LudoPresentationKind.dice && animation.current?.playerId == userId;
-
-    final diceState = rollingNow
-        ? LudoDiceVisualState.rolling
-        : (canStartRoll || canRoll) && actionsAllowed && !animation.blocking
-            ? LudoDiceVisualState.ready
-            : active
-                ? LudoDiceVisualState.waiting
-                : LudoDiceVisualState.disabled;
-
-    final status = resigned
-        ? 'Left'
-        : rankIndex >= 0
-            ? (rankIndex == 0 ? 'Winner' : 'Finished')
-            : preGame
-                ? (startRolled ? 'Rolled' : (startCandidate ? (isMe ? 'Tap to roll' : 'Rolling…') : null))
-                : active
-                    ? (game.turnPhase == LudoTurnPhase.waitingForMove
-                        ? (isMe ? 'Move a token' : 'Moving…')
-                        : (isMe ? 'Your turn' : 'Rolling…'))
-                    : null;
-
-    return LudoSeatView(
-      participant: participant,
-      corner: orientation.cornerOf(participant.color ?? LudoColor.red),
-      isMe: isMe,
-      active: active,
-      // Presented face first; after a reconnect fall back to the last known
-      // roll, but never while a roll is queued (that would spoil it).
-      diceValue: _presentedDice[userId] ??
-          (animation.busy ? null : match.lastDiceByPlayer[userId]) ??
-          (preGame ? snapshot.startingRoll.rolls[userId] : null),
-      diceKey: _diceKeys[userId] ?? 0,
-      spinning: isMe && _mySpin,
-      diceState: diceState,
-      turnEndsAt: active ? match.timing?.turnEndsAt : null,
-      turnSeconds: match.turnDurationSeconds,
-      status: status,
-      rank: rankIndex >= 0 && game.players.length > 2 ? rankIndex + 1 : (rankIndex == 0 ? 1 : null),
-      resigned: resigned,
-      recentRolls: _rollHistory[userId] ?? const [],
-      strikes: match.strikes[userId] ?? 0,
-      reaction: ref.read(matchReactionsProvider)[userId]?.reaction.display,
-      reactionSeq: ref.read(matchReactionsProvider)[userId]?.seq ?? 0,
-      maxStrikes: match.maxStrikes,
-      onRoll: canStartRoll || canRoll ? () => _rollMine(startRoll: canStartRoll) : null,
-    );
-  }
-
-  /// Landing previews while it is my move (the server computed them).
-  List<LudoGhostView> _ghosts(LudoMatchViewState match, LudoGameState game, String? me, LudoColor? myColor, bool canAct) {
-    if (!canAct ||
-        myColor == null ||
-        _pendingTokenId != null ||
-        game.currentPlayerId != me ||
-        game.turnPhase != LudoTurnPhase.waitingForMove) {
-      return const [];
-    }
-    return [
-      for (final preview in match.legalMoves)
-        if (game.legalTokenIds.contains(preview.tokenId))
-          LudoGhostView(
-            tokenId: preview.tokenId,
-            color: myColor,
-            toProgress: preview.toProgress,
-            captures: preview.captures.isNotEmpty,
-            safe: preview.safe,
-            onTap: () => _moveToken(preview.tokenId),
-          ),
-    ];
-  }
-
-  List<LudoBoardTokenView> _buildTokens({
-    required LudoGameState game,
-    required String? me,
-    required bool actionsAllowed,
-    required LudoPresentationEvent? animation,
-    required String? pendingTokenId,
-  }) {
-    final raw = <({LudoToken token, int baseIndex})>[];
-    for (final player in game.players) {
-      for (var i = 0; i < player.tokens.length; i++) {
-        raw.add((token: player.tokens[i], baseIndex: i));
-      }
-    }
-
-    final groups = <String, List<int>>{};
-    for (var i = 0; i < raw.length; i++) {
-      final item = raw[i];
-      final key = LudoBoardGeometry.occupancyKey(color: item.token.color, progress: item.token.progress, tokenId: item.token.id);
-      groups.putIfAbsent(key, () => []).add(i);
-    }
-    final stackIndexByToken = <String, int>{};
-    final stackCountByToken = <String, int>{};
-    for (final indexes in groups.values) {
-      for (var s = 0; s < indexes.length; s++) {
-        final tokenId = raw[indexes[s]].token.id;
-        stackIndexByToken[tokenId] = s;
-        stackCountByToken[tokenId] = indexes.length;
-      }
-    }
-
-    return [
-      for (final item in raw)
-        () {
-          final selectable = me == item.token.ownerId &&
-              game.legalTokenIds.contains(item.token.id) &&
-              actionsAllowed &&
-              pendingTokenId == null;
-          return LudoBoardTokenView(
-            id: item.token.id,
-            color: item.token.color,
-            progress: item.token.progress,
-            baseIndex: item.baseIndex,
-            highlighted: selectable,
-            emphasized: animation?.kind == LudoPresentationKind.capture && (animation?.tokenIds.contains(item.token.id) ?? false),
-            pending: pendingTokenId == item.token.id,
-            finished: item.token.state == LudoTokenState.finished || item.token.progress > 56,
-            stackIndex: stackIndexByToken[item.token.id] ?? 0,
-            stackCount: stackCountByToken[item.token.id] ?? 1,
-            onTap: selectable
-                ? () => _moveToken(item.token.id)
-                : null,
-          );
-        }(),
-    ];
-  }
-
-  _BannerData _banner(LudoGameState game, LudoRuntimeSnapshot snapshot, String? me, List<LudoMatchParticipant> participants) {
-    LudoMatchParticipant? find(String? id) => participants.where((p) => p.userId == id).firstOrNull;
-    String name(String? id) => (find(id)?.displayLabel() ?? 'Opponent').toUpperCase();
-    const gold = Color(0xFFFFC83D);
-
-    if (game.phase == LudoMatchPhase.finished) {
-      final winner = game.winnerOrder.firstOrNull;
-      return _BannerData(
-        winner == me ? 'YOU WON!' : '${name(winner)} WON',
-        find(winner)?.color?.color ?? gold,
-        mine: winner == me,
-      );
-    }
-    if (game.phase == LudoMatchPhase.preGame) {
-      final mine = me != null && snapshot.startingRoll.candidatePlayerIds.contains(me) && !snapshot.startingRoll.rolls.containsKey(me);
-      if (mine) return _BannerData(snapshot.startingRoll.round > 1 ? 'TIE! ROLL AGAIN' : 'ROLL TO START', find(me)?.color?.color ?? gold, mine: true);
-      return const _BannerData('WHO STARTS?', gold);
-    }
-    final current = game.currentPlayerId;
-    final color = find(current)?.color?.color ?? gold;
-    return current == me ? _BannerData('YOUR TURN', color, mine: true) : _BannerData("${name(current)}'S TURN", color);
-  }
-
-  String _hint(LudoGameState game, String? me, bool presenting) {
-    if (presenting || game.currentPlayerId != me || game.phase != LudoMatchPhase.playing) return '';
-    return game.turnPhase == LudoTurnPhase.waitingForMove ? 'Tap a glowing token to move' : 'Tap your dice to roll';
   }
 
   Future<void> _confirmExit(BuildContext context, LudoGameState game) async {
@@ -603,7 +399,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => const _MatchChatSheet(),
+      builder: (_) => const MatchChatSheet(),
     );
     controller.setPanelOpen(false);
   }
@@ -654,326 +450,4 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       ),
     );
   }
-}
-
-/// Participants with colors filled from the game state (any player count).
-List<LudoMatchParticipant> _participants(List<LudoMatchParticipant> participants, LudoRuntimeSnapshot snapshot) {
-  final colorById = {for (final player in snapshot.game.players) player.userId: player.color};
-  if (participants.isEmpty) {
-    return [
-      for (final (index, player) in snapshot.game.players.indexed)
-        LudoMatchParticipant(userId: player.userId, fullName: 'Player', seat: index, color: player.color),
-    ];
-  }
-  return [
-    for (final p in participants)
-      LudoMatchParticipant(userId: p.userId, fullName: p.fullName, seat: p.seat, color: p.color ?? colorById[p.userId]),
-  ];
-}
-
-class _SeatRow extends StatelessWidget {
-  const _SeatRow({this.left, this.right, this.onWarningSecond, this.warnUserId});
-  final LudoSeatView? left;
-  final LudoSeatView? right;
-  final VoidCallback? onWarningSecond;
-  final String? warnUserId;
-
-  @override
-  Widget build(BuildContext context) {
-    // Each seat owns half the row and scales down on narrow phones instead of
-    // overflowing (4 players on a 360px screen).
-    Widget seat(LudoSeatView? view, Alignment alignment) => Expanded(
-          child: Align(
-            alignment: alignment,
-            child: view == null
-                ? null
-                : FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: alignment,
-                    child: LudoSeat(seat: view, onWarningSecond: view.participant.userId == warnUserId ? onWarningSecond : null),
-                  ),
-          ),
-        );
-    return SizedBox(
-      height: 108,
-      child: Row(children: [seat(left, Alignment.centerLeft), const SizedBox(width: 8), seat(right, Alignment.centerRight)]),
-    );
-  }
-}
-
-class _BannerData {
-  const _BannerData(this.text, this.color, {this.mine = false});
-  final String text;
-  final Color color;
-  final bool mine;
-}
-
-/// "YOUR TURN" / "SAMUEL'S TURN" pill in the current player's color. Pulses
-/// when it is my move so it is impossible to miss.
-class _TurnBanner extends StatefulWidget {
-  const _TurnBanner({required this.banner});
-  final _BannerData banner;
-
-  @override
-  State<_TurnBanner> createState() => _TurnBannerState();
-}
-
-class _TurnBannerState extends State<_TurnBanner> with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
-
-  @override
-  void initState() {
-    super.initState();
-    _sync();
-  }
-
-  @override
-  void didUpdateWidget(covariant _TurnBanner oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.banner.mine != widget.banner.mine) _sync();
-  }
-
-  void _sync() => widget.banner.mine ? _pulse.repeat(reverse: true) : (_pulse..stop()..value = 0);
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final banner = widget.banner;
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 260),
-      transitionBuilder: (child, animation) => ScaleTransition(
-        scale: Tween(begin: 0.85, end: 1.0).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutBack)),
-        child: FadeTransition(opacity: animation, child: child),
-      ),
-      child: AnimatedBuilder(
-        key: ValueKey(banner.text),
-        animation: _pulse,
-        builder: (context, child) => Transform.scale(scale: 1 + _pulse.value * 0.05, child: child),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-          decoration: BoxDecoration(
-            color: banner.color,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.85), width: 1.5),
-            boxShadow: [BoxShadow(color: banner.color.withValues(alpha: 0.6), blurRadius: 14)],
-          ),
-          child: Text(
-            banner.text,
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 1.2),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Deep navy table with a faint scattered-dice pattern.
-class _TableBackdrop extends CustomPainter {
-  const _TableBackdrop();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..shader = const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF0B1530), Color(0xFF13306B), Color(0xFF0B1530)],
-        ).createShader(rect),
-    );
-    final tile = Paint()..color = Colors.white.withValues(alpha: 0.035);
-    final pip = Paint()..color = Colors.white.withValues(alpha: 0.05);
-    const step = 74.0;
-    canvas.save();
-    canvas.rotate(-0.35);
-    for (var y = -size.height; y < size.height * 1.6; y += step) {
-      for (var x = -size.width; x < size.width * 1.6; x += step) {
-        final offset = ((y / step).round().isEven) ? 0.0 : step / 2;
-        final r = Rect.fromLTWH(x + offset, y, 34, 34);
-        canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(8)), tile);
-        canvas.drawCircle(r.center, 3.2, pip);
-      }
-    }
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant _TableBackdrop oldDelegate) => false;
-}
-
-class _TopBar extends StatelessWidget {
-  const _TopBar({
-    required this.unread,
-    required this.soundOn,
-    required this.recovering,
-    required this.onExit,
-    required this.onChat,
-    required this.onReact,
-    required this.onToggleSound,
-    required this.onMenu,
-  });
-
-  final int unread;
-  final bool soundOn;
-  final bool recovering;
-  final VoidCallback onExit;
-  final VoidCallback onChat;
-  final VoidCallback onReact;
-  final VoidCallback onToggleSound;
-  final VoidCallback onMenu;
-
-  @override
-  Widget build(BuildContext context) {
-    Widget pill({required Widget child, VoidCallback? onTap, String? tooltip}) => Tooltip(
-          message: tooltip ?? '',
-          child: Material(
-            color: Colors.white.withValues(alpha: 0.1),
-            shape: StadiumBorder(side: BorderSide(color: Colors.white.withValues(alpha: 0.18))),
-            child: InkWell(
-              customBorder: const StadiumBorder(),
-              onTap: onTap,
-              child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7), child: child),
-            ),
-          ),
-        );
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
-      child: Row(children: [
-        pill(
-          onTap: onExit,
-          tooltip: 'Exit match',
-          child: const Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.chevron_left_rounded, size: 18, color: Color(0xFFFF7A7A)),
-            Text('Exit', style: TextStyle(color: Color(0xFFFF7A7A), fontWeight: FontWeight.w700)),
-          ]),
-        ),
-        const Spacer(),
-        pill(
-          onTap: onToggleSound,
-          tooltip: soundOn ? 'Mute sounds' : 'Unmute sounds',
-          child: Icon(soundOn ? Icons.volume_up_rounded : Icons.volume_off_rounded, size: 18, color: Colors.white),
-        ),
-        const SizedBox(width: 8),
-        pill(
-          onTap: onReact,
-          tooltip: 'Reactions',
-          child: const Icon(Icons.emoji_emotions_outlined, size: 18, color: Colors.white),
-        ),
-        const SizedBox(width: 8),
-        pill(
-          onTap: onChat,
-          tooltip: 'Match chat',
-          child: Badge(
-            isLabelVisible: unread > 0,
-            label: Text('$unread'),
-            child: const Icon(Icons.chat_bubble_outline_rounded, size: 18, color: Colors.white),
-          ),
-        ),
-        const SizedBox(width: 8),
-        pill(
-          onTap: onMenu,
-          tooltip: 'Menu',
-          child: recovering
-              ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Icon(Icons.more_horiz_rounded, size: 18, color: Colors.white),
-        ),
-      ]),
-    );
-  }
-}
-
-class _MatchChatSheet extends ConsumerWidget {
-  const _MatchChatSheet();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final chat = ref.watch(matchChatControllerProvider);
-    final me = ref.watch(authControllerProvider.select((auth) => auth.user?.id));
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.6,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
-              child: Row(children: [
-                Expanded(child: Text('Match chat', style: Theme.of(context).textTheme.titleMedium)),
-                IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
-              ]),
-            ),
-            Expanded(
-              child: chat.loading && chat.messages.isEmpty
-                  ? const Center(child: CircularProgressIndicator())
-                  : ChatThread(
-                      lines: [
-                        for (final m in chat.messages)
-                          ChatLine(
-                            id: m.id,
-                            text: m.text,
-                            senderName: m.sender.displayName,
-                            mine: m.sender.userId == me,
-                            createdAt: m.createdAt,
-                          ),
-                      ],
-                      sending: chat.sending,
-                      error: chat.error,
-                      emptyText: 'Say good luck 👋',
-                      onSend: ref.read(matchChatControllerProvider.notifier).send,
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ConnectionBanner extends StatelessWidget {
-  const _ConnectionBanner({required this.status, required this.recovering});
-  final GameSocketStatus status;
-  final bool recovering;
-
-  @override
-  Widget build(BuildContext context) {
-    if (status == GameSocketStatus.connected && !recovering) return const SizedBox.shrink();
-    final text = recovering
-        ? 'Recovering match…'
-        : status == GameSocketStatus.connecting || status == GameSocketStatus.recovering
-            ? 'Reconnecting…'
-            : 'Connection lost — board preserved';
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.secondaryContainer.withValues(alpha: 0.85),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        child: Row(children: [
-          SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: scheme.onSecondaryContainer)),
-          const SizedBox(width: 8),
-          Expanded(child: Text(text, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSecondaryContainer))),
-        ]),
-      ),
-    );
-  }
-}
-
-class _InlineMessage extends StatelessWidget {
-  const _InlineMessage({required this.message});
-  final String message;
-  @override
-  Widget build(BuildContext context) => Container(
-        width: double.infinity,
-        margin: const EdgeInsets.only(bottom: 6),
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(color: Theme.of(context).colorScheme.errorContainer, borderRadius: BorderRadius.circular(10)),
-        child: Text(message, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer, fontSize: 13)),
-      );
 }

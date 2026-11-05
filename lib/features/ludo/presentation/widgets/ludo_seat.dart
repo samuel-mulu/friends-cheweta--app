@@ -331,3 +331,34 @@ class _CountdownState extends ConsumerState<_Countdown> {
     );
   }
 }
+
+/// Two seats side by side (top or bottom of the board).
+class LudoSeatRow extends StatelessWidget {
+  const LudoSeatRow({super.key, this.left, this.right, this.onWarningSecond, this.warnUserId});
+  final LudoSeatView? left;
+  final LudoSeatView? right;
+  final VoidCallback? onWarningSecond;
+  final String? warnUserId;
+
+  @override
+  Widget build(BuildContext context) {
+    // Each seat owns half the row and scales down on narrow phones instead of
+    // overflowing (4 players on a 360px screen).
+    Widget seat(LudoSeatView? view, Alignment alignment) => Expanded(
+          child: Align(
+            alignment: alignment,
+            child: view == null
+                ? null
+                : FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: alignment,
+                    child: LudoSeat(seat: view, onWarningSecond: view.participant.userId == warnUserId ? onWarningSecond : null),
+                  ),
+          ),
+        );
+    return SizedBox(
+      height: 108,
+      child: Row(children: [seat(left, Alignment.centerLeft), const SizedBox(width: 8), seat(right, Alignment.centerRight)]),
+    );
+  }
+}
