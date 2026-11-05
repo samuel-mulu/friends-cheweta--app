@@ -31,6 +31,10 @@ class FakeSocket extends Fake implements GameSocketService {
   }
 
   @override
+  Future<Map<String, dynamic>> sendCommand(String event, Map<String, dynamic> payload, {Duration? timeout}) =>
+      emitWithAck(event, payload);
+
+  @override
   Future<void> connect() async {}
 
   var _eventSeq = 0;

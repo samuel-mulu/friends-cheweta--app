@@ -19,6 +19,7 @@ class LudoBoard extends StatelessWidget {
     this.orientation = LudoBoardOrientation.identity,
     this.onStep,
     this.ghosts = const [],
+    this.onBoardTap,
   });
 
   final List<LudoBoardTokenView> tokens;
@@ -31,6 +32,12 @@ class LudoBoard extends StatelessWidget {
 
   /// Called each time the walking token lands on a cell (for step sounds).
   final VoidCallback? onStep;
+
+  /// A tap that hit no movable token or preview (so the screen can explain why).
+  final VoidCallback? onBoardTap;
+
+  /// Smallest comfortable touch target for a movable token.
+  static const minHit = 44.0;
 
   @override
   Widget build(BuildContext context) {
@@ -63,6 +70,18 @@ class LudoBoard extends StatelessWidget {
               ? null
               : centerOf(move.tokenAfter.color, move.tokenAfter.progress, 0);
 
+          Widget placed(LudoBoardTokenView token) => _PlacedToken(
+                // Keys keep each token's element (and its implicit animation)
+                // attached to the right token, even when paint order changes.
+                key: ValueKey(token.id),
+                token: token,
+                center: holdAt != null && move!.capturedTokenIds.contains(token.id)
+                    ? holdAt
+                    : centerOf(token.color, token.progress, token.baseIndex,
+                        stackIndex: token.stackIndex, stackCount: token.stackCount),
+                tokenSize: tokenSize,
+              );
+
           return DecoratedBox(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
@@ -91,6 +110,13 @@ class LudoBoard extends StatelessWidget {
                     ),
                   ),
                 ),
+                Positioned.fill(
+                  child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: onBoardTap),
+                ),
+                // Paint order = touch priority: idle tokens, then previews, then
+                // movable tokens on top, so the glowing token always gets the tap.
+                for (final token in tokens)
+                  if (!token.isSelectable && move?.tokenAfter.id != token.id) placed(token),
                 for (final ghost in ghosts)
                   _Ghost(
                     key: ValueKey('ghost-${ghost.tokenId}'),
@@ -99,18 +125,7 @@ class LudoBoard extends StatelessWidget {
                     tokenSize: tokenSize,
                   ),
                 for (final token in tokens)
-                  if (move?.tokenAfter.id != token.id)
-                    _PlacedToken(
-                      // Keys keep each token's element (and its implicit
-                      // animation) attached to the right token.
-                      key: ValueKey(token.id),
-                      token: token,
-                      center: holdAt != null && move!.capturedTokenIds.contains(token.id)
-                          ? holdAt
-                          : centerOf(token.color, token.progress, token.baseIndex,
-                              stackIndex: token.stackIndex, stackCount: token.stackCount),
-                      tokenSize: tokenSize,
-                    ),
+                  if (token.isSelectable && move?.tokenAfter.id != token.id) placed(token),
                 if (move != null)
                   _WalkingToken(
                     key: ValueKey('move-$animationSequence'),
@@ -202,16 +217,20 @@ class _PlacedToken extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Movable tokens get a bigger box (touch target) around the same pin.
+    final box = token.isSelectable ? math.max(tokenSize, LudoBoard.minHit) : tokenSize;
+    final grow = (box - tokenSize) / 2;
     return AnimatedPositioned(
       // Implicit motion for jumps that are not walked: capture flights home,
       // stack re-arrangement and recovery snaps.
       duration: LudoMotion.captureFlight,
       curve: Curves.easeInOutCubic,
-      left: center.dx - tokenSize / 2,
-      top: center.dy - tokenSize * LudoBoard.pinAnchor,
-      width: tokenSize,
-      height: tokenSize,
+      left: center.dx - tokenSize / 2 - grow,
+      top: center.dy - tokenSize * LudoBoard.pinAnchor - grow,
+      width: box,
+      height: box,
       child: LudoTokenPiece(
+        hitSize: box,
         color: token.color,
         size: tokenSize,
         baseIndex: token.baseIndex,

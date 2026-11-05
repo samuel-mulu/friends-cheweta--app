@@ -16,7 +16,8 @@ class LudoTokenPiece extends StatefulWidget {
     this.pending = false,
     this.finished = false,
     this.onTap,
-  });
+    double? hitSize,
+  }) : hitSize = hitSize ?? size;
 
   final LudoColor color;
   final double size;
@@ -26,6 +27,9 @@ class LudoTokenPiece extends StatefulWidget {
   final bool pending;
   final bool finished;
   final VoidCallback? onTap;
+
+  /// Touch target (>= [size]); the pin is drawn centred inside it.
+  final double hitSize;
 
   @override
   State<LudoTokenPiece> createState() => _LudoTokenPieceState();
@@ -86,40 +90,45 @@ class _LudoTokenPieceState extends State<LudoTokenPiece> with SingleTickerProvid
                 ? 0.92
                 : 1.0;
 
-    return Semantics(
-      button: selectable,
-      enabled: selectable,
-      label: label.toString(),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: selectable ? (_) => setState(() => _pressed = true) : null,
-        onTapUp: selectable
-            ? (_) {
-                setState(() => _pressed = false);
-                widget.onTap?.call();
-              }
-            : null,
-        onTapCancel: selectable ? () => setState(() => _pressed = false) : null,
-        child: AnimatedScale(
-          scale: scale,
-          duration: const Duration(milliseconds: 140),
-          curve: Curves.easeOut,
-          child: SizedBox.square(
-            dimension: widget.size,
-            child: AnimatedBuilder(
-              animation: _bob,
-              builder: (context, _) => CustomPaint(
-                painter: _PinPainter(
-                  color: widget.color,
-                  highlighted: widget.highlighted,
-                  pending: widget.pending,
-                  finished: widget.finished,
-                  phase: _bob.value,
-                ),
-              ),
+    final pin = AnimatedScale(
+      scale: scale,
+      duration: const Duration(milliseconds: 140),
+      curve: Curves.easeOut,
+      child: SizedBox.square(
+        dimension: widget.size,
+        child: AnimatedBuilder(
+          animation: _bob,
+          builder: (context, _) => CustomPaint(
+            painter: _PinPainter(
+              color: widget.color,
+              highlighted: widget.highlighted,
+              pending: widget.pending,
+              finished: widget.finished,
+              phase: _bob.value,
             ),
           ),
         ),
+      ),
+    );
+
+    // A token that can't be moved is see-through for touches, so it never
+    // swallows a tap meant for a movable token (or landing preview) beneath.
+    if (!selectable) {
+      return Semantics(label: label.toString(), child: IgnorePointer(child: Center(child: pin)));
+    }
+    return Semantics(
+      button: true,
+      enabled: true,
+      label: label.toString(),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) {
+          setState(() => _pressed = false);
+          widget.onTap?.call();
+        },
+        onTapCancel: () => setState(() => _pressed = false),
+        child: SizedBox.square(dimension: widget.hitSize, child: Center(child: pin)),
       ),
     );
   }

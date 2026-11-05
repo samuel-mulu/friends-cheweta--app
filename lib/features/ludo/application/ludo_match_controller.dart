@@ -184,24 +184,24 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
       'expectedVersion': snapshot.game.version,
       if (tokenId != null) 'tokenId': tokenId,
     };
+    Map<String, dynamic> ack;
     try {
-      var ack = await ref.read(gameSocketServiceProvider).emitWithAck(eventName, payload);
-      if (ack['ok'] != true && ack['code'] == 'ACK_TIMEOUT') {
-        // Same user action, same commandId. Backend Redis dedupe makes retry safe.
-        ack = await ref.read(gameSocketServiceProvider).emitWithAck(eventName, payload);
-      }
-      if (ack['ok'] == true) {
-        state = state.copyWith(clearPending: true);
-        return true; // ACK means accepted/deduped. State changes only from server EVENT.
-      }
-      state = state.copyWith(clearPending: true, error: _ackMessage(ack));
-      if (ack['code'] == 'MATCH_VERSION_CONFLICT') unawaited(recover(reason: 'version_conflict'));
-      return false;
+      ack = await ref.read(gameSocketServiceProvider).sendCommand(eventName, payload);
     } catch (_) {
-      state = state.copyWith(clearPending: true, error: 'The command could not be sent. Reconnect and try again.');
-      return false;
+      ack = const {'ok': false, 'code': 'SEND_FAILED'};
     }
+    // Only clear our own command: a server event may already have cleared it.
+    if (state.pendingCommandId == commandId) state = state.copyWith(clearPending: true);
+    if (ack['ok'] == true) return true; // state itself changes only from server events
+    state = state.copyWith(error: _ackMessage(ack));
+    // Unknown outcome or stale view: ask the server for the truth instead of guessing.
+    if (_recoverOn.contains(ack['code'])) unawaited(recover(reason: 'command_${ack['code']}'));
+    return false;
   }
+
+  /// Failures after which the local view may be wrong (the command may even
+  /// have succeeded): resync from the server.
+  static const _recoverOn = {'ACK_TIMEOUT', 'MATCH_VERSION_CONFLICT', 'SEND_FAILED', 'MATCH_ROOM_NOT_JOINED'};
 
   void _onEvent(RealtimeEvent event) {
     final matchId = state.matchId;
@@ -569,6 +569,11 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
         return 'Rejoining the match room…';
       case 'MATCH_NOT_ACTIVE':
         return 'This match is no longer active.';
+      case 'SOCKET_DISCONNECTED':
+        return 'Reconnecting… your move was not sent.';
+      case 'ACK_TIMEOUT':
+      case 'SEND_FAILED':
+        return 'Slow connection. Syncing the board…';
       default:
         return ack['message']?.toString() ?? 'The game request failed.';
     }

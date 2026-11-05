@@ -260,7 +260,7 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.tap(find.byType(LudoTokenPiece).first);
+      await tester.tap(find.byWidgetPredicate((w) => w is LudoTokenPiece && w.onTap != null));
       await tester.pump();
       expect(moved, isTrue);
     });

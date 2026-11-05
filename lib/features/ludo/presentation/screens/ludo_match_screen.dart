@@ -50,6 +50,10 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
   /// Presented rolls per player, newest first (shown as small faces).
   final Map<String, List<int>> _rollHistory = {};
 
+  /// Short explanation after a tap that could not act (never fail silently).
+  String? _nudge;
+  Timer? _nudgeTimer;
+
   @override
   void initState() {
     super.initState();
@@ -69,8 +73,34 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
 
   @override
   void dispose() {
+    _nudgeTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// The board was tapped where nothing can act: say why.
+  void _explainTap(LudoGameState game, String? me, {required bool connected, required bool blocked}) {
+    final String? text;
+    if (!connected) {
+      text = 'Reconnecting…';
+    } else if (blocked || game.phase == LudoMatchPhase.finished) {
+      text = null; // something is animating; the hint returns right after
+    } else if (game.phase == LudoMatchPhase.preGame) {
+      text = 'Tap your dice to roll';
+    } else if (game.currentPlayerId != me) {
+      text = 'Wait for your turn';
+    } else if (game.turnPhase == LudoTurnPhase.waitingForRoll) {
+      text = 'Roll your dice first';
+    } else {
+      text = 'Tap a glowing token';
+    }
+    if (text == null) return;
+    _tick();
+    _nudgeTimer?.cancel();
+    setState(() => _nudge = text);
+    _nudgeTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (mounted) setState(() => _nudge = null);
+    });
   }
 
   void _onPresentation(LudoAnimationState? previous, LudoAnimationState next) {
@@ -204,6 +234,8 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     final orientation = LudoBoardOrientation.forViewer(myColor);
     final actionsAllowed = match.pendingCommandId == null && !match.recovering && socket == GameSocketStatus.connected;
     final presenting = animation.busy;
+    final blocked = animation.blocking;
+    final connected = socket == GameSocketStatus.connected && !match.recovering;
     final seats = [
       for (final participant in participants)
         _seatFor(
@@ -221,15 +253,15 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     final tokens = _buildTokens(
       game: game,
       me: me,
-      // Wait for the queue to finish presenting before inviting a move, so a
-      // highlighted token never appears before its dice has landed.
-      actionsAllowed: actionsAllowed && !presenting,
+      // Wait for dice/move animations before inviting a move, so a highlighted
+      // token never appears before its dice has landed.
+      actionsAllowed: actionsAllowed && !blocked,
       animation: animation.current,
       pendingTokenId: _pendingTokenId,
     );
 
     final banner = _banner(game, snapshot, me, participants);
-    final hint = _hint(game, me, presenting);
+    final hint = _nudge ?? _hint(game, me, blocked);
 
     // The match is always presented on the dark game table, regardless of the
     // app theme, like a dedicated game screen.
@@ -272,7 +304,8 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                                     animation.current?.kind == LudoPresentationKind.move ? animation.current?.move : null,
                                 animationSequence: animation.sequence,
                                 onStep: () => ref.read(gameSoundServiceProvider).play(GameSound.step, volume: 0.5),
-                                ghosts: _ghosts(match, game, me, myColor, actionsAllowed && !presenting),
+                                ghosts: _ghosts(match, game, me, myColor, actionsAllowed && !blocked),
+                                onBoardTap: () => _explainTap(game, me, connected: connected, blocked: blocked),
                               ),
                             ),
                           ),
@@ -346,7 +379,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
 
     final diceState = rollingNow
         ? LudoDiceVisualState.rolling
-        : (canStartRoll || canRoll) && actionsAllowed && !animation.busy
+        : (canStartRoll || canRoll) && actionsAllowed && !animation.blocking
             ? LudoDiceVisualState.ready
             : active
                 ? LudoDiceVisualState.waiting

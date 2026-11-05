@@ -133,6 +133,8 @@ class GameSocketService {
     });
   }
 
+  /// Request/response that (re)connects first if needed. For lobby, chat and
+  /// joins, where waiting for the connection is the right thing to do.
   Future<Map<String, dynamic>> emitWithAck(
     String event, [
     Map<String, dynamic> payload = const {},
@@ -140,7 +142,24 @@ class GameSocketService {
     if (!isConnected) await connect();
     final socket = _socket;
     if (socket == null || !socket.connected) throw StateError('SOCKET_NOT_CONNECTED');
+    return _ack(socket, event, payload, const Duration(seconds: 10));
+  }
 
+  /// In-game command: never waits for a connection and gives up quickly, so a
+  /// tap can't freeze the board. The caller recovers state on failure.
+  Future<Map<String, dynamic>> sendCommand(
+    String event,
+    Map<String, dynamic> payload, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final socket = _socket;
+    if (socket == null || !socket.connected) {
+      return const {'ok': false, 'code': 'SOCKET_DISCONNECTED', 'message': 'Reconnecting…'};
+    }
+    return _ack(socket, event, payload, timeout);
+  }
+
+  Future<Map<String, dynamic>> _ack(io.Socket socket, String event, Map<String, dynamic> payload, Duration timeout) {
     final completer = Completer<Map<String, dynamic>>();
     socket.emitWithAck(event, payload, ack: (raw) {
       if (completer.isCompleted) return;
@@ -152,7 +171,7 @@ class GameSocketService {
     });
 
     return completer.future.timeout(
-      const Duration(seconds: 10),
+      timeout,
       onTimeout: () => <String, dynamic>{
         'ok': false,
         'code': 'ACK_TIMEOUT',
