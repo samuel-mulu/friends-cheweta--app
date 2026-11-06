@@ -4,6 +4,7 @@ import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_motion.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_seats.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/celebration.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board_geometry.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board_painter.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_token.dart';
@@ -20,6 +21,7 @@ class LudoBoard extends StatelessWidget {
     this.onStep,
     this.ghosts = const [],
     this.onBoardTap,
+    this.homeBurst,
   });
 
   final List<LudoBoardTokenView> tokens;
@@ -35,6 +37,9 @@ class LudoBoard extends StatelessWidget {
 
   /// A tap that hit no movable token or preview (so the screen can explain why).
   final VoidCallback? onBoardTap;
+
+  /// Confetti at this color's home triangle; a new [seq] plays it again.
+  final ({LudoColor color, int seq})? homeBurst;
 
   /// Smallest comfortable touch target for a movable token.
   static const minHit = 44.0;
@@ -126,6 +131,15 @@ class LudoBoard extends StatelessWidget {
                   ),
                 for (final token in tokens)
                   if (token.isSelectable && move?.tokenAfter.id != token.id) placed(token),
+                if (homeBurst case final burst?)
+                  Positioned.fromRect(
+                    rect: Rect.fromCenter(
+                      center: centerOf(burst.color, LudoBoard.finishProgress, 0),
+                      width: cell * 6,
+                      height: cell * 6,
+                    ),
+                    child: Confetti(key: ValueKey('home-burst-${burst.seq}'), seed: burst.seq, count: 28),
+                  ),
                 if (move != null)
                   _WalkingToken(
                     key: ValueKey('move-$animationSequence'),
@@ -145,6 +159,9 @@ class LudoBoard extends StatelessWidget {
       ),
     );
   }
+
+  /// Progress of a token that reached home (centre triangle).
+  static const finishProgress = 57;
 
   /// Tokens are pins: place them so the tip (not the middle) sits on the cell.
   static const pinAnchor = 0.72;

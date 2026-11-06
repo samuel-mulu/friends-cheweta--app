@@ -14,7 +14,9 @@ import 'package:friends_game_app/features/ludo/application/ludo_match_controller
 import 'package:friends_game_app/features/ludo/application/match_reactions_controller.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_seats.dart';
+import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
 import 'package:friends_game_app/features/ludo/presentation/match_presenter.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/celebration.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_seat.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/match_chat_sheet.dart';
@@ -52,6 +54,13 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
   /// Presented rolls per player, newest first (shown as small faces).
   final Map<String, List<int>> _rollHistory = {};
 
+  /// Last token-home confetti (color + presentation sequence).
+  ({LudoColor color, int seq})? _homeBurst;
+
+  /// Full-screen win moment, shown once when the result is presented.
+  bool _celebrating = false;
+  Timer? _celebrationTimer;
+
   /// Short explanation after a tap that could not act (never fail silently).
   String? _nudge;
   Timer? _nudgeTimer;
@@ -76,6 +85,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
   @override
   void dispose() {
     _nudgeTimer?.cancel();
+    _celebrationTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -108,6 +118,16 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       });
     }
 
+    if (event.kind == LudoPresentationKind.finish && event.tokenId != null) {
+      final color = snapshot?.game.tokenById(event.tokenId!)?.color;
+      if (color != null) setState(() => _homeBurst = (color: color, seq: next.sequence));
+    }
+    if (event.kind == LudoPresentationKind.matchFinished && !_celebrating) {
+      setState(() => _celebrating = true);
+      _celebrationTimer?.cancel();
+      _celebrationTimer = Timer(const Duration(milliseconds: 2800), _endCelebration);
+    }
+
     final feedback = feedbackFor(
       event,
       me: me,
@@ -129,6 +149,10 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       case null:
         break;
     }
+  }
+
+  void _endCelebration() {
+    if (mounted && _celebrating) setState(() => _celebrating = false);
   }
 
   void _tick() {
@@ -283,6 +307,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                                 onStep: () => ref.read(gameSoundServiceProvider).play(GameSound.step, volume: 0.5),
                                 ghosts: view.ghosts(onMove: _moveToken),
                                 onBoardTap: () => _explainTap(view.tapExplanation),
+                                homeBurst: _homeBurst,
                               ),
                             ),
                           ),
@@ -325,6 +350,14 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                 ],
               ),
             ),
+            if (_celebrating)
+              Positioned.fill(
+                child: WinCelebration(
+                  title: view.banner.text,
+                  subtitle: game.tokensToWin < 4 ? 'First to ${game.tokensToWin} home' : 'All 4 tokens home',
+                  onDismiss: _endCelebration,
+                ),
+              ),
           ],
         ),
       ),

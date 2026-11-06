@@ -5,9 +5,11 @@ import 'package:friends_game_app/core/audio/game_sound_service.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/chat/application/match_chat_controller.dart';
+import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/presentation/screens/ludo_match_screen.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/celebration.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_seat.dart';
 import 'support/fake_socket.dart';
 
@@ -137,5 +139,36 @@ void main() {
     await _pump(tester, ['me', 'p2'], match: () => _FixedMatch(_snapshot(['me', 'p2']), strikes: const {'p2': 2}));
     final seats = tester.widgetList<LudoSeat>(find.byType(LudoSeat));
     expect(seats.firstWhere((s) => !s.seat.isMe).seat.strikes, 2);
+  });
+
+  testWidgets('a token reaching home bursts confetti; the result shows a win moment, tap to dismiss', (tester) async {
+    await _pump(tester, ['me', 'p2']);
+    final queue = ProviderScope.containerOf(tester.element(find.byType(LudoMatchScreen)))
+        .read(ludoAnimationQueueProvider.notifier);
+
+    queue.enqueue(const LudoPresentationEvent(kind: LudoPresentationKind.finish, playerId: 'me', tokenId: 'RED-1'));
+    await tester.pump();
+    expect(find.byType(Confetti), findsOneWidget);
+
+    queue.enqueue(const LudoPresentationEvent(kind: LudoPresentationKind.matchFinished));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byType(WinCelebration), findsOneWidget);
+    await tester.tap(find.byType(WinCelebration));
+    await tester.pump();
+    expect(find.byType(WinCelebration), findsNothing);
+
+    await tester.pump(const Duration(seconds: 4)); // let the queue and timers finish
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the win moment also ends on its own', (tester) async {
+    await _pump(tester, ['me', 'p2']);
+    ProviderScope.containerOf(tester.element(find.byType(LudoMatchScreen)))
+        .read(ludoAnimationQueueProvider.notifier)
+        .enqueue(const LudoPresentationEvent(kind: LudoPresentationKind.matchFinished));
+    await tester.pump();
+    expect(find.byType(WinCelebration), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
+    expect(find.byType(WinCelebration), findsNothing);
   });
 }
