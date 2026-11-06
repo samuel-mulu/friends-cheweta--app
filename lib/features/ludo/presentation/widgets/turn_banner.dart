@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:friends_game_app/features/ludo/presentation/match_presenter.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/crown_icon.dart';
 
 /// "YOUR TURN" / "SAMUEL'S TURN" pill in the current player's color. Pulses
 /// when it is my move so it is impossible to miss.
@@ -63,4 +64,28 @@ class _TurnBannerState extends State<TurnBanner> with SingleTickerProviderStateM
       ),
     );
   }
+}
+
+/// "👑 FIRST TO 2 HOME" under the banner when the match is not the classic 4.
+class MatchGoalChip extends StatelessWidget {
+  const MatchGoalChip({super.key, required this.tokensToWin});
+  final int tokensToWin;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.25),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: const Color(0xFFFFC83D).withValues(alpha: 0.6)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const CrownIcon(size: 13),
+          const SizedBox(width: 6),
+          Text(
+            'FIRST TO $tokensToWin HOME',
+            style: const TextStyle(color: Color(0xFFFFE27A), fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.8),
+          ),
+        ]),
+      );
 }

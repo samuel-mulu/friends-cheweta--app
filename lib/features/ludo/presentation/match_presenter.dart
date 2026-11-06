@@ -140,6 +140,8 @@ class MatchPresenter {
       reactionSeq: reaction?.seq ?? 0,
       maxStrikes: match.maxStrikes,
       onRoll: canStartRoll || canRoll ? () => onRoll(canStartRoll) : null,
+      tokensHome: game.tokensHome(userId),
+      tokensToWin: game.tokensToWin,
     );
   }
 

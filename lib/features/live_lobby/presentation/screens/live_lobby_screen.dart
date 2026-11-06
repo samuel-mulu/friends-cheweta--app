@@ -9,6 +9,8 @@ import 'package:friends_game_app/features/chat/presentation/widgets/chat_thread.
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
 import 'package:friends_game_app/features/live_lobby/domain/lobby_player.dart';
 import 'package:friends_game_app/features/live_lobby/presentation/controllers/live_lobby_controller.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/crown_icon.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/goal_picker.dart';
 import 'package:go_router/go_router.dart';
 
 class LiveLobbyScreen extends ConsumerStatefulWidget {
@@ -107,7 +109,10 @@ class _LiveLobbyScreenState extends ConsumerState<LiveLobbyScreen> {
                               stake: stake,
                               onReady: controller.ready,
                               onUnready: controller.unready,
-                              onInvite: controller.createInvite),
+                              onInvite: () async {
+                                final goal = await pickGoal(context, confirmLabel: 'Create invite');
+                                if (goal != null) await controller.createInvite(tokensToWin: goal);
+                              }),
                           const SizedBox(height: 12),
                           SegmentedButton<int>(
                             segments: [
@@ -160,6 +165,7 @@ class _LiveLobbyScreenState extends ConsumerState<LiveLobbyScreen> {
                       challenge.opponentName ??
                       'Player',
                   stake: stake,
+                  tokensToWin: challenge.tokensToWin,
                   expiresAt: challenge.expiresAt,
                   busy: state.busy,
                   onAccept: controller.accept,
@@ -315,7 +321,10 @@ class _PlayersTab extends StatelessWidget {
                     state.activeChallenge == null &&
                     !state.busy &&
                     !state.isRecovering,
-                onConnect: () => controller.challenge(player),
+                onConnect: () async {
+                  final goal = await pickGoal(context, confirmLabel: 'Connect');
+                  if (goal != null) await controller.challenge(player, tokensToWin: goal);
+                },
                 onMessage: () => context.push('/chats/${player.userId}', extra: player.displayName),
               )),
       ],
@@ -398,12 +407,26 @@ class _PlayerTile extends StatelessWidget {
       };
 }
 
+/// "👑👑 First to 2 home" under a challenge or invite.
+class _GoalLine extends StatelessWidget {
+  const _GoalLine({required this.tokensToWin});
+  final int tokensToWin;
+
+  @override
+  Widget build(BuildContext context) => Row(children: [
+        CrownRow(count: tokensToWin, size: 18, emptyColor: Theme.of(context).colorScheme.outline),
+        const SizedBox(width: 8),
+        Text(goalLabel(tokensToWin), style: const TextStyle(fontWeight: FontWeight.w700)),
+      ]);
+}
+
 class _ChallengePanel extends StatefulWidget {
   const _ChallengePanel(
       {required this.isIncoming,
       this.inviteCode,
       required this.title,
       required this.stake,
+      this.tokensToWin = 4,
       required this.expiresAt,
       required this.busy,
       required this.onAccept,
@@ -414,6 +437,7 @@ class _ChallengePanel extends StatefulWidget {
   final String? inviteCode;
   final String title;
   final String stake;
+  final int tokensToWin;
   final DateTime expiresAt;
   final bool busy;
   final VoidCallback onAccept;
@@ -435,6 +459,8 @@ class _ChallengePanelState extends State<_ChallengePanel> {
               Text('Invite a friend', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
               Text('Share this code. Your friend opens Ludo → Join with code.\nLudo • ${widget.stake} • $timeText'),
+              const SizedBox(height: 8),
+              _GoalLine(tokensToWin: widget.tokensToWin),
               const SizedBox(height: 12),
               Row(children: [
                 Expanded(
@@ -503,6 +529,8 @@ class _ChallengePanelState extends State<_ChallengePanel> {
                 Text(widget.isIncoming
                     ? '${widget.title} wants to play Ludo • ${widget.stake}\n$timeText'
                     : 'Ludo • ${widget.stake}\n$timeText'),
+                const SizedBox(height: 8),
+                _GoalLine(tokensToWin: widget.tokensToWin),
                 const SizedBox(height: 12),
                 if (widget.isIncoming)
                   Row(children: [

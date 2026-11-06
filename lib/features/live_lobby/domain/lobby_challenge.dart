@@ -17,6 +17,7 @@ class LobbyChallenge {
     this.challengerName,
     this.opponentName,
     this.matchId,
+    this.tokensToWin = 4,
   });
 
   final String id;
@@ -34,6 +35,9 @@ class LobbyChallenge {
 
   /// Set once accepted: the durable match both players enter.
   final String? matchId;
+
+  /// "First to N home" (1-4) the match will be played to.
+  final int tokensToWin;
 
   bool get isRematch => kind == 'REMATCH';
   bool get isInvite => kind == 'INVITE';
@@ -66,6 +70,7 @@ class LobbyChallenge {
       challengerName: optional('challengerName'),
       opponentName: optional('opponentName'),
       matchId: _matchId(json),
+      tokensToWin: (int.tryParse(json['tokensToWin']?.toString() ?? '') ?? 4).clamp(1, 4).toInt(),
     );
   }
 

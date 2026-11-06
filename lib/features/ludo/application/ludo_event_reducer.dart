@@ -82,9 +82,11 @@ LudoRuntimeSnapshot reduceLudoEvent(LudoRuntimeSnapshot snapshot, RealtimeEvent 
       if (playerId != null && !game.winnerOrder.contains(playerId)) {
         game = game.copyWith(winnerOrder: [...game.winnerOrder, playerId]);
       }
+      game = _retire(game, data['tokenIds']);
       break;
     case 'ludo:player_resigned':
       if (playerId != null && !resigned.contains(playerId)) resigned.add(playerId);
+      game = _retire(game, data['tokenIds']);
       break;
     case 'match:finished':
       game = game.copyWith(
@@ -99,6 +101,15 @@ LudoRuntimeSnapshot reduceLudoEvent(LudoRuntimeSnapshot snapshot, RealtimeEvent 
       break;
   }
   return snapshot.copyWith(game: game, startingRoll: startingRoll, resignedPlayerIds: resigned);
+}
+
+/// A player who is out takes their unfinished tokens back to the yard.
+LudoGameState _retire(LudoGameState game, Object? tokenIds) {
+  for (final id in (tokenIds as List? ?? const []).map((e) => e.toString())) {
+    final token = game.tokenById(id);
+    if (token != null) game = game.replaceToken(token.copyWith(state: LudoTokenState.base, progress: -1));
+  }
+  return game;
 }
 
 /// Turn deadline estimate until the next exact timing arrives from the server.

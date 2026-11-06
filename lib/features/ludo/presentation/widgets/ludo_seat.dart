@@ -5,6 +5,7 @@ import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_seats.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/crown_icon.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_dice.dart';
 
 /// Everything one corner seat shows. Built by the match screen from server state.
@@ -29,6 +30,8 @@ class LudoSeatView {
     this.reaction,
     this.reactionSeq = 0,
     this.onRoll,
+    this.tokensHome = 0,
+    this.tokensToWin = 4,
   });
 
   final LudoMatchParticipant participant;
@@ -58,6 +61,10 @@ class LudoSeatView {
   final String? reaction;
   final int reactionSeq;
   final VoidCallback? onRoll;
+
+  /// Goal progress: crowns filled per token home, out of [tokensToWin].
+  final int tokensHome;
+  final int tokensToWin;
 
   LudoColor get color => participant.color ?? LudoColor.red;
   bool get onRight => corner == LudoCorner.topRight || corner == LudoCorner.bottomRight;
@@ -92,6 +99,13 @@ class LudoSeat extends StatelessWidget {
               fontSize: 12.5,
               fontWeight: seat.active ? FontWeight.w800 : FontWeight.w600,
             ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Semantics(
+            label: '${seat.tokensHome} of ${seat.tokensToWin} tokens home',
+            child: CrownRow(count: seat.tokensToWin, filled: seat.tokensHome, size: 11, spacing: 1),
           ),
         ),
         if (seat.strikes > 0)

@@ -12,8 +12,10 @@ class PreferencesStorage {
 
   String? getString(String key) => _preferences.getString(key);
   bool? getBool(String key) => _preferences.getBool(key);
+  int? getInt(String key) => _preferences.getInt(key);
   Future<bool> setString(String key, String value) => _preferences.setString(key, value);
   Future<bool> setBool(String key, bool value) => _preferences.setBool(key, value);
+  Future<bool> setInt(String key, int value) => _preferences.setInt(key, value);
   Future<bool> remove(String key) => _preferences.remove(key);
 }
 

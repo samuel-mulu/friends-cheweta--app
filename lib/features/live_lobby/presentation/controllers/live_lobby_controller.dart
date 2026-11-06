@@ -237,7 +237,7 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
     } catch (_) {}
   }
 
-  Future<void> challenge(LobbyPlayer player) async {
+  Future<void> challenge(LobbyPlayer player, {int tokensToWin = 4}) async {
     // Being ONLINE is enough: the server readies the challenger in the same step.
     if (!player.isReady || state.busy || state.activeChallenge != null || state.isChallenged) return;
     state = state.copyWith(busy: true, pendingChallengeUserId: player.userId, clearError: true);
@@ -245,6 +245,7 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
       final ack = await ref.read(gameSocketServiceProvider).emitWithAck('challenge:create', {
         'commandId': _uuid.v4(),
         'opponentUserId': player.userId,
+        'tokensToWin': tokensToWin,
       });
       if (ack['ok'] != true) {
         state = state.copyWith(busy: false, clearPendingChallenge: true, error: _message(ack));
@@ -259,7 +260,7 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
   Future<void> cancel() => _challengeCommand('challenge:cancel');
 
   /// Create a shareable invite code for this lobby's mode.
-  Future<void> createInvite() async {
+  Future<void> createInvite({int tokensToWin = 4}) async {
     final mode = state.mode;
     if (mode == null || state.busy || state.activeChallenge != null) return;
     state = state.copyWith(busy: true, clearError: true);
@@ -267,6 +268,7 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
       final ack = await ref.read(gameSocketServiceProvider).emitWithAck('challenge:invite_create', {
         'commandId': _uuid.v4(),
         'gameModeId': mode.id,
+        'tokensToWin': tokensToWin,
       });
       final data = ack['data'];
       state = ack['ok'] == true && data is Map

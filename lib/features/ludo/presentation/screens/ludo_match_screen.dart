@@ -268,6 +268,10 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                           LudoSeatRow(left: seatAt(LudoCorner.topLeft), right: seatAt(LudoCorner.topRight)),
                           const SizedBox(height: 6),
                           TurnBanner(banner: view.banner),
+                          if (game.tokensToWin < 4) ...[
+                            const SizedBox(height: 4),
+                            MatchGoalChip(tokensToWin: game.tokensToWin),
+                          ],
                           const SizedBox(height: 8),
                           Expanded(
                             child: Center(

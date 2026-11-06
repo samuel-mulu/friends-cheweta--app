@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/goal_picker.dart';
+import 'package:friends_game_app/features/profile/presentation/controllers/preferences_controller.dart';
 
 /// Free practice against the computer (server-run bot, no stake).
 enum PracticeLevel {
@@ -26,10 +28,11 @@ class PracticeLauncher {
   static const _uuid = Uuid();
 
   /// Starts (or resumes) a practice game; returns the match id.
-  Future<String> start(PracticeLevel level) async {
+  Future<String> start(PracticeLevel level, {int tokensToWin = 4}) async {
     final ack = await _ref.read(gameSocketServiceProvider).emitWithAck('practice:start', {
       'commandId': _uuid.v4(),
       'level': level.code,
+      'tokensToWin': tokensToWin,
     });
     final data = ack['data'];
     final matchId = ack['ok'] == true && data is Map ? data['matchId']?.toString() : null;
@@ -85,13 +88,17 @@ Future<void> showPracticeSheet(BuildContext context, WidgetRef ref) async {
     ),
   );
   if (level == null || !context.mounted) return;
+  final goal = await pickGoal(context, confirmLabel: 'Start');
+  if (goal == null || !context.mounted) return;
   await startPractice(context, ref, level);
 }
 
 Future<void> startPractice(BuildContext context, WidgetRef ref, PracticeLevel level) async {
   final messenger = ScaffoldMessenger.of(context);
   try {
-    final matchId = await ref.read(practiceLauncherProvider).start(level);
+    // "Play again" reuses the last goal chosen.
+    final goal = ref.read(playerPreferencesProvider).tokensToWin;
+    final matchId = await ref.read(practiceLauncherProvider).start(level, tokensToWin: goal);
     if (context.mounted) context.go('/ludo/match/$matchId');
   } catch (error) {
     messenger.showSnackBar(SnackBar(content: Text(error is PracticeStartException ? error.message : 'Could not start practice.')));

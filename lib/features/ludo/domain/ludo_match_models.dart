@@ -141,6 +141,7 @@ class LudoGameState {
     required this.consecutiveSixes,
     required this.legalTokenIds,
     required this.winnerOrder,
+    this.tokensToWin = 4,
   });
 
   final String rulesVersion;
@@ -154,6 +155,13 @@ class LudoGameState {
   final int consecutiveSixes;
   final List<String> legalTokenIds;
   final List<String> winnerOrder;
+
+  /// "First to N home" (1-4); 4 = classic.
+  final int tokensToWin;
+
+  /// Tokens [userId] has brought home so far.
+  int tokensHome(String userId) =>
+      players.where((p) => p.userId == userId).expand((p) => p.tokens).where((t) => t.state == LudoTokenState.finished).length;
 
   factory LudoGameState.fromJson(Map<String, dynamic> json) => LudoGameState(
         rulesVersion: json['rulesVersion']?.toString() ?? '',
@@ -170,6 +178,7 @@ class LudoGameState {
         consecutiveSixes: int.tryParse(json['consecutiveSixes']?.toString() ?? '') ?? 0,
         legalTokenIds: (json['legalTokenIds'] as List? ?? const []).map((e) => e.toString()).toList(growable: false),
         winnerOrder: (json['winnerOrder'] as List? ?? const []).map((e) => e.toString()).toList(growable: false),
+        tokensToWin: (int.tryParse(json['tokensToWin']?.toString() ?? '') ?? 4).clamp(1, 4).toInt(),
       );
 
   LudoGameState copyWith({
@@ -197,6 +206,7 @@ class LudoGameState {
         consecutiveSixes: consecutiveSixes ?? this.consecutiveSixes,
         legalTokenIds: legalTokenIds ?? this.legalTokenIds,
         winnerOrder: winnerOrder ?? this.winnerOrder,
+        tokensToWin: tokensToWin,
       );
 
   LudoToken? tokenById(String id) {
