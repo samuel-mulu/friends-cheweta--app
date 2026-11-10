@@ -88,11 +88,13 @@ class KartaGame {
     required this.targetScore,
     required this.scores,
     required this.round,
+    required this.starterId,
     required this.callerId,
     required this.calling,
     required this.deckCommitment,
     this.calledRank,
     this.currentPlayerId,
+    this.receiverId,
     this.dealt = const [],
     this.lastRound,
     this.winnerOrder = const [],
@@ -106,12 +108,21 @@ class KartaGame {
   final int targetScore;
   final Map<String, int> scores;
   final int round;
+
+  /// Deals every card this round (the previous round's winner).
+  final String starterId;
+
+  /// Names the rank this round (the other player).
   final String callerId;
 
   /// True while the caller picks a rank; false while cards are turned.
   final bool calling;
   final String? calledRank;
+  /// Who must act: the chooser while calling, the starter while dealing.
   final String? currentPlayerId;
+
+  /// Who gets the next card the starter turns.
+  final String? receiverId;
   final List<KartaDealt> dealt;
   final String deckCommitment;
   final KartaRoundResult? lastRound;
@@ -137,10 +148,12 @@ class KartaGame {
         scores: (json['scores'] is Map ? Map<String, dynamic>.from(json['scores'] as Map) : const <String, dynamic>{})
             .map((key, value) => MapEntry(key, _int(value))),
         round: _int(json['round']),
+        starterId: json['starterId']?.toString() ?? '',
         callerId: json['callerId']?.toString() ?? '',
         calling: json['roundPhase']?.toString() != 'FLIPPING',
         calledRank: json['calledRank']?.toString(),
         currentPlayerId: json['currentPlayerId']?.toString(),
+        receiverId: json['receiverId']?.toString(),
         dealt: KartaDealt.listFrom(json['dealt']),
         deckCommitment: json['deckCommitment']?.toString() ?? '',
         lastRound: KartaRoundResult.fromJson(json['lastRound']),
@@ -153,12 +166,15 @@ class KartaGame {
     bool? finished,
     Map<String, int>? scores,
     int? round,
+    String? starterId,
     String? callerId,
     bool? calling,
     String? calledRank,
     bool clearCalledRank = false,
     String? currentPlayerId,
     bool clearCurrentPlayer = false,
+    String? receiverId,
+    bool clearReceiver = false,
     List<KartaDealt>? dealt,
     String? deckCommitment,
     KartaRoundResult? lastRound,
@@ -173,10 +189,12 @@ class KartaGame {
         targetScore: targetScore,
         scores: scores ?? this.scores,
         round: round ?? this.round,
+        starterId: starterId ?? this.starterId,
         callerId: callerId ?? this.callerId,
         calling: calling ?? this.calling,
         calledRank: clearCalledRank ? null : calledRank ?? this.calledRank,
         currentPlayerId: clearCurrentPlayer ? null : currentPlayerId ?? this.currentPlayerId,
+        receiverId: clearReceiver ? null : receiverId ?? this.receiverId,
         dealt: dealt ?? this.dealt,
         deckCommitment: deckCommitment ?? this.deckCommitment,
         lastRound: lastRound ?? this.lastRound,

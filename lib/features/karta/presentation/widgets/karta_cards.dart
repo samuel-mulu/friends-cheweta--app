@@ -17,6 +17,59 @@ abstract final class KartaPalette {
 /// Card size from a width (classic 5:7 proportions).
 Size kartaCardSize(double width) => Size(width, width * 1.4);
 
+/// A rank as a card: the big rank with all four suits (any suit counts).
+/// Used for choosing and for showing the called rank.
+class KartaRankCard extends StatelessWidget {
+  const KartaRankCard({super.key, required this.rank, this.width = 48, this.selected = false, this.glow = false});
+  final String rank;
+  final double width;
+
+  /// Picked in the rank picker: gold edge.
+  final bool selected;
+
+  /// The called rank on the table: soft gold glow.
+  final bool glow;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = kartaCardSize(width);
+    final suit = TextStyle(fontSize: width * 0.17, height: 1);
+    final gold = selected || glow;
+    return Semantics(
+      label: 'Rank $rank',
+      selected: selected,
+      child: Container(
+        width: size.width,
+        height: size.height,
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFFFF6DA) : Colors.white,
+          borderRadius: BorderRadius.circular(width * 0.12),
+          border: Border.all(color: gold ? KartaPalette.gold : const Color(0xFFDADDE2), width: gold ? width * 0.05 : 1),
+          boxShadow: [
+            if (glow) BoxShadow(color: KartaPalette.gold.withValues(alpha: 0.55), blurRadius: width * 0.4, spreadRadius: 2),
+            BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 5, offset: const Offset(0, 3)),
+          ],
+        ),
+        child: Stack(alignment: Alignment.center, children: [
+          Positioned(left: width * 0.09, top: width * 0.08, child: Text('♠', style: suit.copyWith(color: KartaPalette.ink))),
+          Positioned(right: width * 0.09, top: width * 0.08, child: Text('♥', style: suit.copyWith(color: KartaPalette.red))),
+          Positioned(left: width * 0.09, bottom: width * 0.08, child: Text('♦', style: suit.copyWith(color: KartaPalette.red))),
+          Positioned(right: width * 0.09, bottom: width * 0.08, child: Text('♣', style: suit.copyWith(color: KartaPalette.ink))),
+          Text(
+            rank,
+            style: TextStyle(
+              color: KartaPalette.ink,
+              fontSize: width * (rank == '10' ? 0.42 : 0.5),
+              fontWeight: FontWeight.w900,
+              height: 1,
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
 class KartaCardFace extends StatelessWidget {
   const KartaCardFace({super.key, required this.card, this.width = 64, this.highlight = false});
   final KartaCard card;

@@ -207,17 +207,17 @@ class KartaMatchController extends Notifier<KartaMatchViewState> {
     KartaRoundEnd? roundEnd;
     switch (event.name) {
       case 'karta:rank_called':
-        next = next.copyWith(
-            calledRank: data['rank']?.toString(), calling: false, currentPlayerId: game.otherThan(data['playerId']?.toString()));
+        // Now the starter deals; the first card goes to the chooser.
+        next = next.copyWith(calledRank: data['rank']?.toString(), calling: false, currentPlayerId: game.starterId, receiverId: game.callerId);
       case 'karta:card_flipped':
-        final playerId = data['playerId']?.toString() ?? '';
+        final receiver = data['playerId']?.toString() ?? '';
         next = next.copyWith(
-          dealt: [...game.dealt, KartaDealt(KartaCard.parse(data['card']?.toString() ?? 'AS'), playerId)],
-          currentPlayerId: game.otherThan(playerId),
+          dealt: [...game.dealt, KartaDealt(KartaCard.parse(data['card']?.toString() ?? 'AS'), receiver)],
+          receiverId: game.otherThan(receiver),
         );
       case 'karta:round_won':
         final result = KartaRoundResult.fromJson(data['result']);
-        next = next.copyWith(scores: _scores(data['scores']) ?? game.scores, lastRound: result, clearCurrentPlayer: true);
+        next = next.copyWith(scores: _scores(data['scores']) ?? game.scores, lastRound: result, clearCurrentPlayer: true, clearReceiver: true);
         if (result != null) {
           roundEnd = KartaRoundEnd(
             result: result,
@@ -229,9 +229,11 @@ class KartaMatchController extends Notifier<KartaMatchViewState> {
       case 'karta:round_started':
         next = next.copyWith(
           round: int.tryParse(data['round']?.toString() ?? '') ?? game.round + 1,
+          starterId: data['starterId']?.toString(),
           callerId: data['callerId']?.toString(),
           calling: true,
           clearCalledRank: true,
+          clearReceiver: true,
           currentPlayerId: data['callerId']?.toString(),
           dealt: const [],
           deckCommitment: data['deckCommitment']?.toString(),
@@ -247,9 +249,10 @@ class KartaMatchController extends Notifier<KartaMatchViewState> {
         );
     }
 
+    // Every accepted action restarts the clock of whoever must act next.
     final timing = next.finished
         ? state.timing.copyWith(version: incoming, clearClock: true)
-        : next.currentPlayerId != null && next.currentPlayerId != game.currentPlayerId || event.name == 'karta:round_started'
+        : next.currentPlayerId != null && event.name != 'karta:round_won'
             ? state.timing.copyWith(
                 version: incoming,
                 playerId: next.currentPlayerId,

@@ -30,7 +30,7 @@ const _copy = {
   ),
   GameCodes.karta: _LobbyCopy(
     'ካርታ ላጥ ላጥ · Karta Lat Lat',
-    'Call a rank, turn the cards. Whoever gets it wins the round. First to 3.',
+    'The chooser names a rank; the starter deals, for away, for me. Whoever gets it wins the round. First to 3.',
     'The deck is sealed before every call and revealed after the round, so anyone can check it was fair.',
   ),
   GameCodes.dama: _LobbyCopy(

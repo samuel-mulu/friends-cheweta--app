@@ -19,7 +19,7 @@ import 'package:friends_game_app/features/match/presentation/widgets/match_chrom
 import 'package:friends_game_app/features/profile/presentation/controllers/preferences_controller.dart';
 
 /// Karta Lat Lat table. The server shuffles, deals and decides; this screen
-/// lets the caller pick a rank, lets the receiver turn ("lat") the next card,
+/// lets the chooser pick a rank, lets the starter turn ("lat") the cards,
 /// and shows each round's result with its fairness check.
 class KartaMatchScreen extends ConsumerStatefulWidget {
   const KartaMatchScreen({super.key, required this.matchId});
@@ -164,7 +164,7 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
           name: userId == me ? 'You' : match.nameOf(userId),
           score: game.scoreOf(userId),
           target: game.targetScore,
-          caller: shown == null && game.callerId == userId,
+          role: shown != null || game.finished ? null : (game.starterId == userId ? 'STARTER' : 'CHOOSER'),
           active: shown == null && !game.finished && game.currentPlayerId == userId,
           turnEndsAt: game.currentPlayerId == userId ? match.timing.turnEndsAt : null,
           turnSeconds: match.turnSeconds,
@@ -242,14 +242,14 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
                   else if (myTurn && game.calling)
                     _RankPicker(picked: _pickedRank, enabled: canAct, onPick: (rank) => setState(() => _pickedRank = rank), onCall: _call)
                   else if (myTurn)
-                    _LatButton(enabled: canAct, onTap: _flip)
+                    _LatButton(enabled: canAct, forMe: game.receiverId == me, receiver: match.nameOf(game.receiverId), onTap: _flip)
                   else
                     Text(
                       !connected
                           ? 'Reconnecting…'
                           : game.calling
-                              ? '${match.nameOf(game.currentPlayerId)} is calling a rank…'
-                              : '${match.nameOf(game.currentPlayerId)} turns the next card…',
+                              ? '${match.nameOf(game.currentPlayerId)} is choosing a rank…'
+                              : '${match.nameOf(game.starterId)} deals · next card ${game.receiverId == me ? 'for you' : 'for ${match.nameOf(game.receiverId)}'}',
                       style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontWeight: FontWeight.w600),
                     ),
                 ]),
@@ -339,12 +339,10 @@ Future<void> showKartaRules(BuildContext context) => showModalBottomSheet<void>(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('ካርታ ላጥ ላጥ · Karta Lat Lat', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
             SizedBox(height: 12),
-            _Rule(Icons.record_voice_over_outlined, 'Call a rank', 'The caller names a rank (A to K). Suits do not matter.'),
-            _Rule(Icons.style_outlined, 'Lat lat!',
-                'Cards are turned one by one, one for each player in turn, starting with the other player.'),
-            _Rule(Icons.emoji_events_outlined, 'Catch it',
-                'Whoever gets the first card of the called rank wins the round. Callers take turns.'),
-            _Rule(Icons.workspace_premium_outlined, 'First to 3', 'The first player to win 3 rounds wins the match.'),
+            _Rule(Icons.record_voice_over_outlined, 'Choose a rank', 'The chooser names a rank (A to K). Suits do not matter.'),
+            _Rule(Icons.style_outlined, 'Lat lat!', 'The starter turns every card: one for the chooser, one for themselves, and so on.'),
+            _Rule(Icons.emoji_events_outlined, 'Catch it', 'Whoever gets the first card of that rank wins the round and starts the next one.'),
+            _Rule(Icons.workspace_premium_outlined, 'First to 3', 'The first player to win 3 rounds wins the match. You can resign at any time.'),
             _Rule(Icons.verified_user_outlined, 'Fair deck',
                 'Each deck is sealed (a secure fingerprint) before the call and revealed after the round. The app checks it.'),
           ]),
@@ -371,7 +369,7 @@ class _Seat extends StatelessWidget {
     required this.name,
     required this.score,
     required this.target,
-    required this.caller,
+    required this.role,
     required this.active,
     required this.turnEndsAt,
     required this.turnSeconds,
@@ -382,7 +380,9 @@ class _Seat extends StatelessWidget {
   final String name;
   final int score;
   final int target;
-  final bool caller;
+
+  /// STARTER (deals) or CHOOSER (names the rank); null between rounds.
+  final String? role;
   final bool active;
   final DateTime? turnEndsAt;
   final int turnSeconds;
@@ -417,13 +417,24 @@ class _Seat extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w800)),
               ),
-              if (caller) ...[
+              if (role != null) ...[
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                  decoration: BoxDecoration(color: KartaPalette.gold, borderRadius: BorderRadius.circular(8)),
-                  child: const Text('CALLER',
-                      style: TextStyle(color: KartaPalette.ink, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.6)),
+                  decoration: BoxDecoration(
+                    color: role == 'STARTER' ? KartaPalette.gold : Colors.transparent,
+                    border: Border.all(color: KartaPalette.gold),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    role!,
+                    style: TextStyle(
+                      color: role == 'STARTER' ? KartaPalette.ink : KartaPalette.gold,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
                 ),
               ],
               if (reaction != null) ...[
@@ -545,6 +556,7 @@ class _Deck extends StatelessWidget {
       );
 }
 
+/// The called rank as a big glowing card (face down until it is called).
 class _CalledRank extends StatelessWidget {
   const _CalledRank({required this.rank, required this.caller, required this.left, required this.round});
   final String? rank;
@@ -554,31 +566,20 @@ class _CalledRank extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('ROUND $round',
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1.5)),
-        const SizedBox(height: 6),
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 300),
-          transitionBuilder: (child, animation) =>
-              ScaleTransition(scale: CurvedAnimation(parent: animation, curve: Curves.elasticOut), child: child),
-          child: Container(
-            key: ValueKey(rank),
-            width: 92,
-            height: 92,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.black.withValues(alpha: 0.25),
-              border: Border.all(color: KartaPalette.gold, width: 3),
-              boxShadow: [if (rank != null) BoxShadow(color: KartaPalette.gold.withValues(alpha: 0.35), blurRadius: 24)],
-            ),
-            child: Text(
-              rank ?? '?',
-              style: TextStyle(color: rank == null ? Colors.white38 : KartaPalette.gold, fontSize: 40, fontWeight: FontWeight.w900),
-            ),
-          ),
+        Text(
+          'ROUND $round',
+          style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1.5),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 380),
+          transitionBuilder: (child, animation) =>
+              ScaleTransition(scale: CurvedAnimation(parent: animation, curve: Curves.easeOutBack), child: child),
+          child: rank == null
+              ? const KartaCardBack(key: ValueKey('back'), width: 70)
+              : KartaRankCard(key: ValueKey(rank), rank: rank!, width: 70, glow: true),
+        ),
+        const SizedBox(height: 8),
         Text(
           caller == null ? 'Waiting for the call' : '$caller called${left != null ? ' · $left left' : ''}',
           maxLines: 2,
@@ -589,6 +590,7 @@ class _CalledRank extends StatelessWidget {
       ]);
 }
 
+/// The chooser picks a rank from a hand of rank cards, then confirms.
 class _RankPicker extends StatelessWidget {
   const _RankPicker({required this.picked, required this.enabled, required this.onPick, required this.onCall});
   final String? picked;
@@ -598,59 +600,61 @@ class _RankPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min, children: [
-        const Text('Call a rank', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 8),
-        Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 6, children: [
-          for (final rank in kartaRanks)
-            GestureDetector(
-              onTap: enabled ? () => onPick(rank) : null,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                width: 42,
-                height: 42,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: picked == rank ? KartaPalette.gold : Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))],
-                ),
-                child: Text(rank, style: const TextStyle(color: KartaPalette.ink, fontSize: 16, fontWeight: FontWeight.w900)),
-              ),
-            ),
-        ]),
+        const Text('Choose a rank', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
         const SizedBox(height: 10),
+        LayoutBuilder(builder: (context, constraints) {
+          // Two rows (7 + 6) that always fit the screen width.
+          final width = ((constraints.maxWidth - 6 * 6) / 7).clamp(30.0, 46.0);
+          return Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 8, children: [
+            for (final rank in kartaRanks)
+              GestureDetector(
+                onTap: enabled ? () => onPick(rank) : null,
+                child: AnimatedSlide(
+                  duration: const Duration(milliseconds: 160),
+                  offset: Offset(0, picked == rank ? -0.12 : 0),
+                  child: KartaRankCard(rank: rank, width: width, selected: picked == rank),
+                ),
+              ),
+          ]);
+        }),
+        const SizedBox(height: 12),
         SizedBox(
           width: double.infinity,
           child: FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: KartaPalette.gold, foregroundColor: KartaPalette.ink, minimumSize: const Size.fromHeight(48)),
+              backgroundColor: KartaPalette.gold,
+              foregroundColor: KartaPalette.ink,
+              minimumSize: const Size.fromHeight(48),
+            ),
             onPressed: enabled && picked != null ? onCall : null,
-            child: Text(picked == null ? 'Pick a rank' : 'Call $picked', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+            child: Text(picked == null ? 'Pick a card' : 'Call $picked', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
           ),
         ),
       ]);
 }
 
-/// The big "turn your card" button (pops in so it is never missed).
+/// The starter's button: says who the next card goes to ("for away" / "for me").
 class _LatButton extends StatelessWidget {
-  const _LatButton({required this.enabled, required this.onTap});
+  const _LatButton({required this.enabled, required this.forMe, required this.receiver, required this.onTap});
   final bool enabled;
+  final bool forMe;
+  final String receiver;
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0.96, end: 1.04),
-        duration: const Duration(milliseconds: 700),
-        curve: Curves.easeInOut,
-        builder: (context, scale, child) => Transform.scale(scale: enabled ? scale : 1, child: child),
-        child: SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(
-                backgroundColor: KartaPalette.gold, foregroundColor: KartaPalette.ink, minimumSize: const Size.fromHeight(56)),
-            onPressed: enabled ? onTap : null,
-            icon: const Icon(Icons.style_rounded),
-            label: const Text('LAT!  Turn your card', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 17, letterSpacing: 0.5)),
+  Widget build(BuildContext context) => SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: KartaPalette.gold,
+            foregroundColor: KartaPalette.ink,
+            minimumSize: const Size.fromHeight(56),
+          ),
+          onPressed: enabled ? onTap : null,
+          icon: const Icon(Icons.style_rounded),
+          label: Text(
+            forMe ? 'LAT!  For me' : 'LAT!  For $receiver',
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 17, letterSpacing: 0.5),
           ),
         ),
       );
