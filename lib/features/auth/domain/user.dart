@@ -14,4 +14,6 @@ class User {
         role: json['role']?.toString() ?? 'PLAYER',
         status: json['status']?.toString() ?? 'ACTIVE',
       );
+
+  Map<String, dynamic> toJson() => {'id': id, 'fullName': fullName, 'phoneNumber': phoneNumber, 'role': role, 'status': status};
 }

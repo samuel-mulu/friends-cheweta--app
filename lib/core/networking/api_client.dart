@@ -22,11 +22,19 @@ class ApiClient {
     return future.whenComplete(() => _refreshInFlight = null);
   }
 
+  /// New access token, or null when the server rejected the refresh token
+  /// (the session is over). Network failures are rethrown instead: a phone
+  /// that is offline must not lose its session.
   Future<String?> _doRefresh() async {
     final refreshToken = await _storage.readRefreshToken();
     if (refreshToken == null) return null;
     try {
-      final response = await Dio(BaseOptions(baseUrl: _dio.options.baseUrl)).post<Map<String, dynamic>>(
+      final response = await Dio(BaseOptions(
+        baseUrl: _dio.options.baseUrl,
+        connectTimeout: _dio.options.connectTimeout,
+        receiveTimeout: _dio.options.receiveTimeout,
+        headers: const {'Accept': 'application/json'},
+      )).post<Map<String, dynamic>>(
         '/auth/refresh',
         data: {'refreshToken': refreshToken},
       );
@@ -36,8 +44,10 @@ class ApiClient {
       if (access == null) return null;
       await _storage.saveTokens(accessToken: access, refreshToken: refresh);
       return access;
-    } on DioException {
-      await _storage.clearTokens();
+    } on DioException catch (error) {
+      final status = error.response?.statusCode;
+      if (status == null || status >= 500) throw mapDioException(error); // offline or server trouble
+      await _storage.clearTokens(); // refresh token rejected
       return null;
     }
   }
@@ -80,7 +90,9 @@ class ApiClient {
 final apiClientProvider = Provider<ApiClient>((ref) {
   final dio = Dio(BaseOptions(
     baseUrl: AppConfig.current.apiBaseUrl,
-    connectTimeout: const Duration(seconds: 45),
+    // A sleeping free-tier server can take ~30-50 s to wake up; screens show
+    // their own progress, and start-up never waits on this (see AuthController).
+    connectTimeout: const Duration(seconds: 20),
     receiveTimeout: const Duration(seconds: 45),
     headers: {'Accept': 'application/json'},
   ));

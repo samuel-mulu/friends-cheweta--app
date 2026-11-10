@@ -28,14 +28,27 @@ import 'package:friends_game_app/features/profile/presentation/screens/profile_s
 import 'package:friends_game_app/features/shell/presentation/main_shell.dart';
 import 'package:friends_game_app/features/wallet/presentation/screens/wallet_screen.dart';
 
+/// True once the splash intro has played (the app leaves the splash only then,
+/// so a fast start never flashes a half-drawn logo).
+final splashIntroDoneProvider = StateProvider<bool>((ref) => false);
+
+/// Built once. Auth and splash changes re-run [GoRouter.redirect] through
+/// `refreshListenable` instead of rebuilding the router (which reset navigation).
 final routerProvider = Provider<GoRouter>((ref) {
-  final auth = ref.watch(authControllerProvider);
+  final refresh = ValueNotifier<int>(0);
+  ref.listen(authControllerProvider.select((auth) => auth.status), (_, __) => refresh.value++);
+  ref.listen(splashIntroDoneProvider, (_, __) => refresh.value++);
+  ref.onDispose(refresh.dispose);
 
   return GoRouter(
     initialLocation: '/splash',
+    refreshListenable: refresh,
     redirect: (context, state) {
+      final auth = ref.read(authControllerProvider);
       final location = state.matchedLocation;
-      if (auth.status == AuthStatus.initializing) return location == '/splash' ? null : '/splash';
+      if (auth.status == AuthStatus.initializing || !ref.read(splashIntroDoneProvider)) {
+        return location == '/splash' ? null : '/splash';
+      }
       final authRoute = location == '/login' || location == '/register';
       if (auth.status == AuthStatus.unauthenticated) return authRoute ? null : '/login';
       if (auth.status == AuthStatus.authenticated && (authRoute || location == '/splash')) return '/home';

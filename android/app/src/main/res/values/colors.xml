@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Friends brand (matches BrandColors in lib/core/widgets/app_logo.dart). -->
+    <color name="brand_navy">#0B1530</color>
+    <color name="brand_indigo">#1C2C6E</color>
+</resources>
