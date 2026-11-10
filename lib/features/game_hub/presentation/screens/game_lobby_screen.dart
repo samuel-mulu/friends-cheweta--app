@@ -4,23 +4,49 @@ import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/core/theme/app_spacing.dart';
 import 'package:friends_game_app/core/utils/money_formatter.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
+import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/game_hub/presentation/controllers/game_hub_controller.dart';
 import 'package:friends_game_app/features/live_lobby/presentation/controllers/live_lobby_controller.dart';
-import 'package:friends_game_app/features/ludo/application/practice_launcher.dart';
+import 'package:friends_game_app/features/match/application/practice_launcher.dart';
 import 'package:friends_game_app/features/wallet/presentation/controllers/wallet_controller.dart';
 
-class LudoLobbyScreen extends ConsumerWidget {
-  const LudoLobbyScreen({super.key});
+/// Per-game copy for the lobby.
+class _LobbyCopy {
+  const _LobbyCopy(this.heroTitle, this.heroText, this.fairness);
+  final String heroTitle;
+  final String heroText;
+  final String fairness;
+}
+
+const _copy = {
+  GameCodes.ludo: _LobbyCopy(
+    'Classic 1v1 Ludo',
+    'Four tokens. Exact finish. Safe squares, captures and blockades.',
+    'Dice, legal moves, turn timing and results are decided by the backend — not by this phone.',
+  ),
+  GameCodes.dama: _LobbyCopy(
+    'Ethiopian Dama',
+    'Flying kings. Capture is compulsory and the biggest capture must be taken.',
+    'Legal moves, captures, the clock and results are decided by the backend — not by this phone.',
+  ),
+};
+
+/// Rooms, practice and "join with code" for one game.
+class GameLobbyScreen extends ConsumerWidget {
+  const GameLobbyScreen({super.key, required this.gameCode});
+  final String gameCode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final hub = ref.watch(gameHubControllerProvider);
     final wallet = ref.watch(walletControllerProvider).wallet;
+    final modes = hub.modesFor(gameCode);
+    final copy = _copy[gameCode] ?? _copy[GameCodes.ludo]!;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Ludo'), actions: [
+      appBar: AppBar(title: Text(GameRoutes.displayName(gameCode)), actions: [
         TextButton.icon(
-          onPressed: () => _joinWithCode(context),
+          onPressed: () => _joinWithCode(context, gameCode),
           icon: const Icon(Icons.vpn_key_outlined),
           label: const Text('Join with code'),
         ),
@@ -30,7 +56,7 @@ class LudoLobbyScreen extends ConsumerWidget {
         child: ListView(
           padding: const EdgeInsets.all(AppSpacing.screen),
           children: [
-            const _LudoHero(),
+            _GameHero(gameCode: gameCode, title: copy.heroTitle, text: copy.heroText),
             const SizedBox(height: 16),
             Card(
               clipBehavior: Clip.antiAlias,
@@ -40,7 +66,7 @@ class LudoLobbyScreen extends ConsumerWidget {
                 title: const Text('Practice vs computer', style: TextStyle(fontWeight: FontWeight.w800)),
                 subtitle: const Text('Free • Easy, Normal or Hard'),
                 trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => showPracticeSheet(context, ref),
+                onTap: () => showPracticeSheet(context, ref, gameCode: gameCode),
               ),
             ),
             const SizedBox(height: 24),
@@ -62,15 +88,20 @@ class LudoLobbyScreen extends ConsumerWidget {
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 16),
-            if (hub.loading && hub.ludoModes.isEmpty)
+            if (hub.loading && modes.isEmpty)
               const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()))
-            else if (hub.error != null && hub.ludoModes.isEmpty)
+            else if (hub.error != null && modes.isEmpty)
               _LobbyError(
                 message: hub.error!,
                 onRetry: () => ref.read(gameHubControllerProvider.notifier).load(),
               )
+            else if (modes.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(child: Text('No rooms are open right now.')),
+              )
             else
-              ...hub.ludoModes.map((mode) {
+              ...modes.map((mode) {
                 final canAfford = wallet != null && wallet.availableBalance >= BigInt.from(mode.stakeAmountMinor);
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 12),
@@ -78,7 +109,7 @@ class LudoLobbyScreen extends ConsumerWidget {
                     mode: mode,
                     canAfford: canAfford,
                     onPlay: canAfford
-                        ? () => context.push('/ludo/matchmaking', extra: mode)
+                        ? () => context.push(GameRoutes.matchmaking(gameCode), extra: mode)
                         : () => context.push('/deposit'),
                   ),
                 );
@@ -98,10 +129,7 @@ class LudoLobbyScreen extends ConsumerWidget {
                         children: [
                           Text('Server-authoritative play', style: Theme.of(context).textTheme.titleSmall),
                           const SizedBox(height: 4),
-                          Text(
-                            'Dice, legal moves, turn timing and results are decided by the backend — not by this phone.',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
+                          Text(copy.fairness, style: Theme.of(context).textTheme.bodySmall),
                         ],
                       ),
                     ),
@@ -116,9 +144,10 @@ class LudoLobbyScreen extends ConsumerWidget {
   }
 }
 
-Future<void> _joinWithCode(BuildContext context) async {
-  final matchId = await showDialog<String>(context: context, builder: (_) => const _JoinCodeDialog());
-  if (matchId != null && context.mounted) context.go('/ludo/match/$matchId');
+Future<void> _joinWithCode(BuildContext context, String gameCode) async {
+  final joined = await showDialog<({String matchId, String? gameCode})>(context: context, builder: (_) => const _JoinCodeDialog());
+  // The code decides the game (a friend may have sent a code for another game).
+  if (joined != null && context.mounted) context.go(GameRoutes.match(joined.gameCode ?? gameCode, joined.matchId));
 }
 
 /// Enter a friend's invite code; joining creates the match immediately.
@@ -146,8 +175,8 @@ class _JoinCodeDialogState extends ConsumerState<_JoinCodeDialog> {
       _error = null;
     });
     try {
-      final matchId = await ref.read(liveLobbyControllerProvider.notifier).joinInvite(_code.text);
-      if (mounted) Navigator.pop(context, matchId);
+      final joined = await ref.read(liveLobbyControllerProvider.notifier).joinInvite(_code.text);
+      if (mounted) Navigator.pop(context, joined);
     } catch (error) {
       if (mounted) {
         setState(() {
@@ -180,8 +209,11 @@ class _JoinCodeDialogState extends ConsumerState<_JoinCodeDialog> {
       );
 }
 
-class _LudoHero extends StatelessWidget {
-  const _LudoHero();
+class _GameHero extends StatelessWidget {
+  const _GameHero({required this.gameCode, required this.title, required this.text});
+  final String gameCode;
+  final String title;
+  final String text;
 
   @override
   Widget build(BuildContext context) {
@@ -201,19 +233,17 @@ class _LudoHero extends StatelessWidget {
               color: scheme.surface,
               borderRadius: BorderRadius.circular(18),
             ),
-            child: const Icon(Icons.grid_view_rounded, size: 34),
+            clipBehavior: Clip.antiAlias,
+            child: gameHeroArt(gameCode),
           ),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Classic 1v1 Ludo', style: Theme.of(context).textTheme.titleLarge),
+                Text(title, style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 6),
-                Text(
-                  'Four tokens. Exact finish. Safe squares, captures and blockades.',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
+                Text(text, style: Theme.of(context).textTheme.bodyMedium),
               ],
             ),
           ),
@@ -301,3 +331,8 @@ class _LobbyError extends StatelessWidget {
     );
   }
 }
+
+/// Square art for a game's hero card.
+Widget gameHeroArt(String gameCode) => switch (gameCode) {
+      _ => const Icon(Icons.grid_view_rounded, size: 34),
+    };

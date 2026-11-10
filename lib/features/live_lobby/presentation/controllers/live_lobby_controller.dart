@@ -6,6 +6,7 @@ import 'package:friends_game_app/core/socket/realtime_event.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/chat/domain/chat_message.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
+import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/live_lobby/domain/lobby_challenge.dart';
 import 'package:friends_game_app/features/live_lobby/domain/lobby_player.dart';
 
@@ -20,6 +21,7 @@ class LiveLobbyState {
     this.busy = false,
     this.error,
     this.acceptedMatchId,
+    this.acceptedGameCode,
     this.messages = const [],
     this.sendingMessage = false,
     this.pendingChallengeUserId,
@@ -36,6 +38,9 @@ class LiveLobbyState {
   final bool busy;
   final String? error;
   final String? acceptedMatchId;
+
+  /// Game of [acceptedMatchId] when the server said (it may differ from this lobby's).
+  final String? acceptedGameCode;
   final List<ChatMessage> messages;
   final bool sendingMessage;
   final String? pendingChallengeUserId;
@@ -131,6 +136,7 @@ class LiveLobbyState {
     String? error,
     bool clearError = false,
     String? acceptedMatchId,
+    String? acceptedGameCode,
     bool clearAcceptedMatch = false,
     List<ChatMessage>? messages,
     bool? sendingMessage,
@@ -148,6 +154,7 @@ class LiveLobbyState {
       busy: busy ?? this.busy,
       error: clearError ? null : error ?? this.error,
       acceptedMatchId: clearAcceptedMatch ? null : acceptedMatchId ?? this.acceptedMatchId,
+      acceptedGameCode: clearAcceptedMatch ? null : acceptedGameCode ?? this.acceptedGameCode,
       messages: messages ?? this.messages,
       sendingMessage: sendingMessage ?? this.sendingMessage,
       pendingChallengeUserId:
@@ -207,12 +214,14 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
             ? LobbyChallenge.fromJson(Map<String, dynamic>.from(data['activeChallenge'] as Map))
             : null;
         final activeMatch = data['activeMatch'] is Map ? data['activeMatch']['id']?.toString() : null;
+        final activeGame = activeMatch != null ? gameCodeOfMatch(data['activeMatch']) : activeChallenge?.matchGameCode;
         final base = LiveLobbyState(
           mode: mode,
           currentUserId: currentUserId,
           myState: _parseState(data['myState']),
           activeChallenge: activeChallenge,
           acceptedMatchId: activeMatch ?? activeChallenge?.matchId,
+          acceptedGameCode: activeGame,
           messages: _parseMessages(data['recentMessages']),
         );
         state = base.withNormalizedPlayers(_parsePlayers(data['players']));
@@ -281,16 +290,17 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
 
   /// Join a friend's invite by code (works outside the lobby). Returns the
   /// match id to enter; throws [InviteJoinException] with a readable message.
-  Future<String> joinInvite(String code) async {
+  /// Joins a friend's invite; the match starts at once. `gameCode` is the
+  /// invite's game (a code may belong to another game than this screen's).
+  Future<({String matchId, String? gameCode})> joinInvite(String code) async {
     final ack = await ref.read(gameSocketServiceProvider).emitWithAck('challenge:invite_join', {
       'commandId': _uuid.v4(),
       'code': code.trim(),
     });
     final data = ack['data'];
-    final matchId = ack['ok'] == true && data is Map
-        ? LobbyChallenge.fromJson(Map<String, dynamic>.from(data)).matchId
-        : null;
-    if (matchId != null) return matchId;
+    final joined = ack['ok'] == true && data is Map ? LobbyChallenge.fromJson(Map<String, dynamic>.from(data)) : null;
+    final matchId = joined?.matchId;
+    if (matchId != null) return (matchId: matchId, gameCode: joined!.matchGameCode);
     throw InviteJoinException(switch (ack['code']?.toString()) {
       'INVITE_NOT_FOUND' => 'That code does not exist or has expired.',
       'CHALLENGE_NOT_PENDING' || 'CHALLENGE_EXPIRED' => 'That invite is no longer available.',
@@ -348,14 +358,13 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
       });
       // The accept ack carries the match too, so a lost event cannot strand the player.
       final data = ack['data'];
-      final matchId = ack['ok'] == true && data is Map
-          ? LobbyChallenge.fromJson(Map<String, dynamic>.from(data)).matchId
-          : null;
+      final accepted = ack['ok'] == true && data is Map ? LobbyChallenge.fromJson(Map<String, dynamic>.from(data)) : null;
       state = state.copyWith(
         busy: false,
+        acceptedGameCode: accepted?.matchGameCode,
         error: ack['ok'] == true ? null : _message(ack),
         clearError: ack['ok'] == true,
-        acceptedMatchId: matchId,
+        acceptedMatchId: accepted?.matchId,
       );
     } catch (_) {
       state = state.copyWith(busy: false, error: 'Challenge command failed.');
@@ -410,6 +419,7 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
           busy: false,
           clearError: true,
           acceptedMatchId: challenge.matchId,
+          acceptedGameCode: challenge.matchGameCode,
         );
         break;
       case 'match:ready':
@@ -421,6 +431,7 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
             activeChallenge: null,
             clearChallenge: true,
             acceptedMatchId: matchId,
+            acceptedGameCode: gameCodeOfMatch(rawMatch),
             busy: false,
             clearError: true,
           );

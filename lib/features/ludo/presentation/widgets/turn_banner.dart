@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:friends_game_app/features/ludo/presentation/match_presenter.dart';
-import 'package:friends_game_app/features/ludo/presentation/widgets/crown_icon.dart';
+import 'package:friends_game_app/features/match/presentation/widgets/crown_icon.dart';
 
 /// "YOUR TURN" / "SAMUEL'S TURN" pill in the current player's color. Pulses
 /// when it is my move so it is impossible to miss.

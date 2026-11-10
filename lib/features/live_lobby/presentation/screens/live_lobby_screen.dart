@@ -7,9 +7,10 @@ import 'package:friends_game_app/core/theme/app_spacing.dart';
 import 'package:friends_game_app/core/utils/money_formatter.dart';
 import 'package:friends_game_app/features/chat/presentation/widgets/chat_thread.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
+import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/live_lobby/domain/lobby_player.dart';
 import 'package:friends_game_app/features/live_lobby/presentation/controllers/live_lobby_controller.dart';
-import 'package:friends_game_app/features/ludo/presentation/widgets/crown_icon.dart';
+import 'package:friends_game_app/features/match/presentation/widgets/crown_icon.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/goal_picker.dart';
 import 'package:go_router/go_router.dart';
 
@@ -23,6 +24,9 @@ class LiveLobbyScreen extends ConsumerStatefulWidget {
 
 class _LiveLobbyScreenState extends ConsumerState<LiveLobbyScreen> {
   int _tab = 0;
+
+  /// Ludo's "first to N home" goal applies to this room.
+  bool get _hasGoal => widget.mode.gameCode == GameCodes.ludo;
   late final LiveLobbyController _lobby;
 
   @override
@@ -54,7 +58,7 @@ class _LiveLobbyScreenState extends ConsumerState<LiveLobbyScreen> {
       if (matchId != null &&
           matchId.isNotEmpty &&
           previous?.acceptedMatchId != matchId) {
-        context.go('/ludo/match/$matchId');
+        context.go(GameRoutes.match(next.acceptedGameCode ?? widget.mode.gameCode, matchId));
       }
     });
 
@@ -78,7 +82,7 @@ class _LiveLobbyScreenState extends ConsumerState<LiveLobbyScreen> {
           appBar: AppBar(
             title:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Ludo • $stake'),
+              Text('${GameRoutes.displayName(widget.mode.gameCode)} • $stake'),
               Text('${state.onlineCount} online • ${state.readyCount} ready',
                   style: Theme.of(context).textTheme.labelSmall),
             ]),
@@ -110,6 +114,7 @@ class _LiveLobbyScreenState extends ConsumerState<LiveLobbyScreen> {
                               onReady: controller.ready,
                               onUnready: controller.unready,
                               onInvite: () async {
+                                if (!_hasGoal) return controller.createInvite();
                                 final goal = await pickGoal(context, confirmLabel: 'Create invite');
                                 if (goal != null) await controller.createInvite(tokensToWin: goal);
                               }),
@@ -165,7 +170,8 @@ class _LiveLobbyScreenState extends ConsumerState<LiveLobbyScreen> {
                       challenge.opponentName ??
                       'Player',
                   stake: stake,
-                  tokensToWin: challenge.tokensToWin,
+                  gameName: GameRoutes.displayName(widget.mode.gameCode),
+                  tokensToWin: _hasGoal ? challenge.tokensToWin : null,
                   expiresAt: challenge.expiresAt,
                   busy: state.busy,
                   onAccept: controller.accept,
@@ -322,6 +328,8 @@ class _PlayersTab extends StatelessWidget {
                     !state.busy &&
                     !state.isRecovering,
                 onConnect: () async {
+                  // "First to N home" is a Ludo option; other games connect directly.
+                  if (state.mode?.gameCode != GameCodes.ludo) return controller.challenge(player);
                   final goal = await pickGoal(context, confirmLabel: 'Connect');
                   if (goal != null) await controller.challenge(player, tokensToWin: goal);
                 },
@@ -426,7 +434,8 @@ class _ChallengePanel extends StatefulWidget {
       this.inviteCode,
       required this.title,
       required this.stake,
-      this.tokensToWin = 4,
+      required this.gameName,
+      this.tokensToWin,
       required this.expiresAt,
       required this.busy,
       required this.onAccept,
@@ -437,7 +446,10 @@ class _ChallengePanel extends StatefulWidget {
   final String? inviteCode;
   final String title;
   final String stake;
-  final int tokensToWin;
+  final String gameName;
+
+  /// Ludo goal; null for games without one.
+  final int? tokensToWin;
   final DateTime expiresAt;
   final bool busy;
   final VoidCallback onAccept;
@@ -458,9 +470,11 @@ class _ChallengePanelState extends State<_ChallengePanel> {
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Text('Invite a friend', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
-              Text('Share this code. Your friend opens Ludo → Join with code.\nLudo • ${widget.stake} • $timeText'),
-              const SizedBox(height: 8),
-              _GoalLine(tokensToWin: widget.tokensToWin),
+              Text('Share this code. Your friend opens ${widget.gameName} → Join with code.\n${widget.gameName} • ${widget.stake} • $timeText'),
+              if (widget.tokensToWin case final goal?) ...[
+                const SizedBox(height: 8),
+                _GoalLine(tokensToWin: goal),
+              ],
               const SizedBox(height: 12),
               Row(children: [
                 Expanded(
@@ -527,10 +541,12 @@ class _ChallengePanelState extends State<_ChallengePanel> {
                     style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 Text(widget.isIncoming
-                    ? '${widget.title} wants to play Ludo • ${widget.stake}\n$timeText'
-                    : 'Ludo • ${widget.stake}\n$timeText'),
-                const SizedBox(height: 8),
-                _GoalLine(tokensToWin: widget.tokensToWin),
+                    ? '${widget.title} wants to play ${widget.gameName} • ${widget.stake}\n$timeText'
+                    : '${widget.gameName} • ${widget.stake}\n$timeText'),
+                if (widget.tokensToWin case final goal?) ...[
+                  const SizedBox(height: 8),
+                  _GoalLine(tokensToWin: goal),
+                ],
                 const SizedBox(height: 12),
                 if (widget.isIncoming)
                   Row(children: [

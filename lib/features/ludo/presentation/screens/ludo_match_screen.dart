@@ -11,17 +11,17 @@ import 'package:friends_game_app/features/chat/application/match_chat_controller
 import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_feedback.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
-import 'package:friends_game_app/features/ludo/application/match_reactions_controller.dart';
+import 'package:friends_game_app/features/match/application/match_reactions_controller.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_seats.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
 import 'package:friends_game_app/features/ludo/presentation/match_presenter.dart';
-import 'package:friends_game_app/features/ludo/presentation/widgets/celebration.dart';
+import 'package:friends_game_app/features/match/presentation/widgets/celebration.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_seat.dart';
-import 'package:friends_game_app/features/ludo/presentation/widgets/match_chat_sheet.dart';
-import 'package:friends_game_app/features/ludo/presentation/widgets/match_chrome.dart';
-import 'package:friends_game_app/features/ludo/presentation/widgets/table_backdrop.dart';
+import 'package:friends_game_app/features/match/presentation/widgets/match_chat_sheet.dart';
+import 'package:friends_game_app/features/match/presentation/widgets/match_chrome.dart';
+import 'package:friends_game_app/features/match/presentation/widgets/table_backdrop.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/turn_banner.dart';
 import 'package:friends_game_app/features/profile/presentation/controllers/preferences_controller.dart';
 

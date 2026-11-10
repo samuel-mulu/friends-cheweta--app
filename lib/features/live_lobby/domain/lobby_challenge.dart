@@ -1,3 +1,4 @@
+import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 /// A pending or resolved challenge as sent by the server.
 ///
 /// `kind` is LOBBY (both players in the lobby), REMATCH (the two players of a
@@ -17,6 +18,7 @@ class LobbyChallenge {
     this.challengerName,
     this.opponentName,
     this.matchId,
+    this.matchGameCode,
     this.tokensToWin = 4,
   });
 
@@ -35,6 +37,9 @@ class LobbyChallenge {
 
   /// Set once accepted: the durable match both players enter.
   final String? matchId;
+
+  /// Game of the created match (from `match.game.code`), when known.
+  final String? matchGameCode;
 
   /// "First to N home" (1-4) the match will be played to.
   final int tokensToWin;
@@ -70,6 +75,7 @@ class LobbyChallenge {
       challengerName: optional('challengerName'),
       opponentName: optional('opponentName'),
       matchId: _matchId(json),
+      matchGameCode: gameCodeOfMatch(json['match']),
       tokensToWin: (int.tryParse(json['tokensToWin']?.toString() ?? '') ?? 4).clamp(1, 4).toInt(),
     );
   }

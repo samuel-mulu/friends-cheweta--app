@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
+import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/goal_picker.dart';
 import 'package:friends_game_app/features/profile/presentation/controllers/preferences_controller.dart';
 
@@ -17,7 +18,18 @@ enum PracticeLevel {
   final String label;
   final String description;
   final IconData icon;
+
+  /// How this bot plays in [gameCode].
+  String describe(String gameCode) => gameCode == GameCodes.dama
+      ? switch (this) {
+          PracticeLevel.easy => 'Relaxed bot that moves at random.',
+          PracticeLevel.normal => 'Looks a move ahead and punishes loose pieces.',
+          PracticeLevel.hard => 'Reads several moves deep. Bring your best.',
+        }
+      : description;
 }
+
+typedef PracticeStart = ({String matchId, String gameCode});
 
 /// Last level chosen this session (for "Play again" on the result screen).
 final lastPracticeLevelProvider = StateProvider<PracticeLevel?>((ref) => null);
@@ -27,12 +39,14 @@ class PracticeLauncher {
   final Ref _ref;
   static const _uuid = Uuid();
 
-  /// Starts (or resumes) a practice game; returns the match id.
-  Future<String> start(PracticeLevel level, {int tokensToWin = 4}) async {
+  /// Starts (or resumes) a practice game. A resumed game may be another game
+  /// than [gameCode]; the result says which screen to open.
+  Future<PracticeStart> start(PracticeLevel level, {int tokensToWin = 4, String gameCode = GameCodes.ludo}) async {
     final ack = await _ref.read(gameSocketServiceProvider).emitWithAck('practice:start', {
       'commandId': _uuid.v4(),
       'level': level.code,
-      'tokensToWin': tokensToWin,
+      if (gameCode == GameCodes.ludo) 'tokensToWin': tokensToWin,
+      if (gameCode != GameCodes.ludo) 'game': gameCode,
     });
     final data = ack['data'];
     final matchId = ack['ok'] == true && data is Map ? data['matchId']?.toString() : null;
@@ -44,7 +58,7 @@ class PracticeLauncher {
       });
     }
     _ref.read(lastPracticeLevelProvider.notifier).state = level;
-    return matchId;
+    return (matchId: matchId, gameCode: (data as Map)['gameCode']?.toString() ?? gameCode);
   }
 }
 
@@ -57,8 +71,8 @@ class PracticeStartException implements Exception {
 
 final practiceLauncherProvider = Provider<PracticeLauncher>(PracticeLauncher.new);
 
-/// Level picker → start → open the match. Shared by the Ludo hub and the result screen.
-Future<void> showPracticeSheet(BuildContext context, WidgetRef ref) async {
+/// Level picker → start → open the match. Shared by the game lobbies and result screens.
+Future<void> showPracticeSheet(BuildContext context, WidgetRef ref, {String gameCode = GameCodes.ludo}) async {
   final level = await showModalBottomSheet<PracticeLevel>(
     context: context,
     showDragHandle: true,
@@ -78,7 +92,7 @@ Future<void> showPracticeSheet(BuildContext context, WidgetRef ref) async {
             ListTile(
               leading: Icon(level.icon),
               title: Text(level.label, style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text(level.description),
+              subtitle: Text(level.describe(gameCode)),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () => Navigator.pop(context, level),
             ),
@@ -88,18 +102,20 @@ Future<void> showPracticeSheet(BuildContext context, WidgetRef ref) async {
     ),
   );
   if (level == null || !context.mounted) return;
-  final goal = await pickGoal(context, confirmLabel: 'Start');
-  if (goal == null || !context.mounted) return;
-  await startPractice(context, ref, level);
+  if (gameCode == GameCodes.ludo) {
+    final goal = await pickGoal(context, confirmLabel: 'Start');
+    if (goal == null || !context.mounted) return;
+  }
+  await startPractice(context, ref, level, gameCode: gameCode);
 }
 
-Future<void> startPractice(BuildContext context, WidgetRef ref, PracticeLevel level) async {
+Future<void> startPractice(BuildContext context, WidgetRef ref, PracticeLevel level, {String gameCode = GameCodes.ludo}) async {
   final messenger = ScaffoldMessenger.of(context);
   try {
-    // "Play again" reuses the last goal chosen.
+    // "Play again" reuses the last goal chosen (Ludo only).
     final goal = ref.read(playerPreferencesProvider).tokensToWin;
-    final matchId = await ref.read(practiceLauncherProvider).start(level, tokensToWin: goal);
-    if (context.mounted) context.go('/ludo/match/$matchId');
+    final started = await ref.read(practiceLauncherProvider).start(level, tokensToWin: goal, gameCode: gameCode);
+    if (context.mounted) context.go(GameRoutes.match(started.gameCode, started.matchId));
   } catch (error) {
     messenger.showSnackBar(SnackBar(content: Text(error is PracticeStartException ? error.message : 'Could not start practice.')));
   }

@@ -31,7 +31,7 @@ class GameHubRepository {
     final response = await _api.request<List<dynamic>>('/games/$gameCode/modes');
     return (response.data ?? const [])
         .whereType<Map>()
-        .map((item) => GameMode.fromJson(Map<String, dynamic>.from(item)))
+        .map((item) => GameMode.fromJson(Map<String, dynamic>.from(item)).withGameCode(gameCode))
         .toList(growable: false);
   }
 }

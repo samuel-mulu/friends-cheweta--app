@@ -8,7 +8,9 @@ import 'package:friends_game_app/features/auth/presentation/screens/register_scr
 import 'package:friends_game_app/features/auth/presentation/screens/splash_screen.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
 import 'package:friends_game_app/features/game_hub/presentation/screens/game_hub_screen.dart';
-import 'package:friends_game_app/features/game_hub/presentation/screens/ludo_lobby_screen.dart';
+import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
+import 'package:friends_game_app/features/game_hub/presentation/controllers/game_hub_controller.dart';
+import 'package:friends_game_app/features/game_hub/presentation/screens/game_lobby_screen.dart';
 import 'package:friends_game_app/features/history/presentation/screens/history_screen.dart';
 import 'package:friends_game_app/features/history/presentation/screens/match_detail_screen.dart';
 import 'package:friends_game_app/features/history/presentation/screens/match_replay_screen.dart';
@@ -63,15 +65,18 @@ final routerProvider = Provider<GoRouter>((ref) {
           peerName: state.extra is String ? state.extra as String : null,
         ),
       ),
-      GoRoute(path: '/ludo', builder: (_, __) => const LudoLobbyScreen()),
-      GoRoute(
-        path: '/ludo/matchmaking',
-        builder: (_, state) {
-          final mode = state.extra;
-          if (mode is GameMode) return LiveLobbyScreen(mode: mode);
-          return const Scaffold(body: Center(child: Text('Choose a Ludo room first.')));
-        },
-      ),
+      // Each live game: its lobby (rooms + practice) and the live matchmaking room.
+      for (final code in liveGameCodes) ...[
+        GoRoute(path: GameRoutes.lobby(code), builder: (_, __) => GameLobbyScreen(gameCode: code)),
+        GoRoute(
+          path: GameRoutes.matchmaking(code),
+          builder: (_, state) {
+            final mode = state.extra;
+            if (mode is GameMode) return LiveLobbyScreen(mode: mode);
+            return Scaffold(body: Center(child: Text('Choose a ${GameRoutes.displayName(code)} room first.')));
+          },
+        ),
+      ],
       GoRoute(path: '/ludo/match/:matchId', builder: (_, state) => LudoMatchScreen(matchId: state.pathParameters['matchId'] ?? '')),
       GoRoute(path: '/ludo/result/:matchId', builder: (_, state) => LudoResultScreen(matchId: state.pathParameters['matchId'] ?? '')),
       GoRoute(path: '/history/:matchId', builder: (_, state) => MatchDetailScreen(matchId: state.pathParameters['matchId'] ?? '')),

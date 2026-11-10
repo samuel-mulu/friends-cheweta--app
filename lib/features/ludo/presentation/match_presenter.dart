@@ -1,7 +1,7 @@
 import 'package:flutter/painting.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
-import 'package:friends_game_app/features/ludo/application/match_reactions_controller.dart';
+import 'package:friends_game_app/features/match/application/match_reactions_controller.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_seats.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';

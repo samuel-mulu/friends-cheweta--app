@@ -6,7 +6,7 @@ import 'package:friends_game_app/core/utils/money_formatter.dart';
 import 'package:friends_game_app/core/widgets/app_error_view.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/history/presentation/controllers/match_history_controller.dart';
-import 'package:friends_game_app/features/ludo/application/practice_launcher.dart';
+import 'package:friends_game_app/features/match/application/practice_launcher.dart';
 import 'package:friends_game_app/features/ludo/application/rematch_controller.dart';
 import 'package:friends_game_app/features/wallet/presentation/controllers/wallet_controller.dart';
 

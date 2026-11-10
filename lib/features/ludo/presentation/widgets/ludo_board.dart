@@ -4,7 +4,7 @@ import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_motion.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_seats.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
-import 'package:friends_game_app/features/ludo/presentation/widgets/celebration.dart';
+import 'package:friends_game_app/features/match/presentation/widgets/celebration.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board_geometry.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board_painter.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_token.dart';

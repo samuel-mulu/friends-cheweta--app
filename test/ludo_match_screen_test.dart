@@ -9,7 +9,7 @@ import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/presentation/screens/ludo_match_screen.dart';
-import 'package:friends_game_app/features/ludo/presentation/widgets/celebration.dart';
+import 'package:friends_game_app/features/match/presentation/widgets/celebration.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_seat.dart';
 import 'support/fake_socket.dart';
 

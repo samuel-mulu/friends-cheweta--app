@@ -1,3 +1,5 @@
+import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
+
 class GameMode {
   const GameMode({
     required this.id,
@@ -10,6 +12,7 @@ class GameMode {
     required this.turnDurationSeconds,
     required this.rulesVersion,
     required this.enabled,
+    this.gameCode = 'LUDO',
   });
 
   final String id;
@@ -22,6 +25,23 @@ class GameMode {
   final int turnDurationSeconds;
   final String rulesVersion;
   final bool enabled;
+
+  /// Backend game code (LUDO, DAMA). Set by the repository from the request.
+  final String gameCode;
+
+  GameMode withGameCode(String code) => GameMode(
+        id: id,
+        gameId: gameId,
+        code: this.code,
+        name: name,
+        playerCount: playerCount,
+        stakeAmountMinor: stakeAmountMinor,
+        platformFeeBps: platformFeeBps,
+        turnDurationSeconds: turnDurationSeconds,
+        rulesVersion: rulesVersion,
+        enabled: enabled,
+        gameCode: code,
+      );
 
   int get totalPotMinor => stakeAmountMinor * playerCount;
 
@@ -41,6 +61,7 @@ class GameMode {
       turnDurationSeconds: _asInt(json['turnDurationSeconds']),
       rulesVersion: json['rulesVersion']?.toString() ?? '',
       enabled: json['enabled'] == true,
+      gameCode: gameCodeOfMatch(json) ?? 'LUDO',
     );
   }
 

@@ -114,7 +114,7 @@ void main() {
     expect(state.activeChallenge?.displayInviteCode, 'ABCDE-FGHJK');
     expect(state.myState, isNot(LobbyPlayerState.challenged));
 
-    expect(await lobby.joinInvite('abcde-fghjk'), 'm-inv');
+    expect((await lobby.joinInvite('abcde-fghjk')).matchId, 'm-inv');
   });
 
   test('invite: a bad code surfaces a readable error', () async {

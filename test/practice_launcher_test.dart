@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
-import 'package:friends_game_app/features/ludo/application/practice_launcher.dart';
+import 'package:friends_game_app/features/match/application/practice_launcher.dart';
 import 'support/fake_socket.dart';
 
 void main() {
@@ -19,7 +19,7 @@ void main() {
         ? {'ok': true, 'data': {'matchId': 'pm-1', 'level': 'HARD'}}
         : {'ok': false};
 
-    expect(await container.read(practiceLauncherProvider).start(PracticeLevel.hard), 'pm-1');
+    expect((await container.read(practiceLauncherProvider).start(PracticeLevel.hard)).matchId, 'pm-1');
     expect(container.read(lastPracticeLevelProvider), PracticeLevel.hard);
   });
 

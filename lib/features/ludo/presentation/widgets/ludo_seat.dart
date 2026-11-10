@@ -5,7 +5,7 @@ import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_seats.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
-import 'package:friends_game_app/features/ludo/presentation/widgets/crown_icon.dart';
+import 'package:friends_game_app/features/match/presentation/widgets/crown_icon.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_dice.dart';
 
 /// Everything one corner seat shows. Built by the match screen from server state.
