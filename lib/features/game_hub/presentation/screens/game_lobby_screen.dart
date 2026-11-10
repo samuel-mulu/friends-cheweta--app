@@ -6,6 +6,8 @@ import 'package:friends_game_app/core/utils/money_formatter.dart';
 import 'package:friends_game_app/features/dama/presentation/screens/dama_match_screen.dart';
 import 'package:friends_game_app/features/dama/presentation/widgets/dama_paint.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
+import 'package:friends_game_app/features/karta/presentation/screens/karta_match_screen.dart';
+import 'package:friends_game_app/features/karta/presentation/widgets/karta_cards.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/game_hub/presentation/controllers/game_hub_controller.dart';
 import 'package:friends_game_app/features/live_lobby/presentation/controllers/live_lobby_controller.dart';
@@ -25,6 +27,11 @@ const _copy = {
     'Classic 1v1 Ludo',
     'Four tokens. Exact finish. Safe squares, captures and blockades.',
     'Dice, legal moves, turn timing and results are decided by the backend — not by this phone.',
+  ),
+  GameCodes.karta: _LobbyCopy(
+    'ካርታ ላጥ ላጥ · Karta Lat Lat',
+    'Call a rank, turn the cards. Whoever gets it wins the round. First to 3.',
+    'The deck is sealed before every call and revealed after the round, so anyone can check it was fair.',
   ),
   GameCodes.dama: _LobbyCopy(
     'Ethiopian Dama',
@@ -60,27 +67,28 @@ class GameLobbyScreen extends ConsumerWidget {
           children: [
             _GameHero(gameCode: gameCode, title: copy.heroTitle, text: copy.heroText),
             const SizedBox(height: 16),
-            Card(
-              clipBehavior: Clip.antiAlias,
-              child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                leading: const CircleAvatar(child: Icon(Icons.smart_toy_outlined)),
-                title: const Text('Practice vs computer', style: TextStyle(fontWeight: FontWeight.w800)),
-                subtitle: const Text('Free • Easy, Normal or Hard'),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => showPracticeSheet(context, ref, gameCode: gameCode),
+            if (practiceGameCodes.contains(gameCode))
+              Card(
+                clipBehavior: Clip.antiAlias,
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  leading: const CircleAvatar(child: Icon(Icons.smart_toy_outlined)),
+                  title: const Text('Practice vs computer', style: TextStyle(fontWeight: FontWeight.w800)),
+                  subtitle: const Text('Free • Easy, Normal or Hard'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => showPracticeSheet(context, ref, gameCode: gameCode),
+                ),
               ),
-            ),
-            if (gameCode == GameCodes.dama) ...[
+            if (gameCode != GameCodes.ludo) ...[
               const SizedBox(height: 8),
               Card(
                 clipBehavior: Clip.antiAlias,
                 child: ListTile(
                   leading: const CircleAvatar(child: Icon(Icons.menu_book_outlined)),
                   title: const Text('How to play', style: TextStyle(fontWeight: FontWeight.w800)),
-                  subtitle: const Text('Compulsory capture, flying kings'),
+                  subtitle: Text(gameCode == GameCodes.karta ? 'Call, lat lat, catch it' : 'Compulsory capture, flying kings'),
                   trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => showDamaRules(context),
+                  onTap: () => gameCode == GameCodes.karta ? showKartaRules(context) : showDamaRules(context),
                 ),
               ),
             ],
@@ -123,9 +131,7 @@ class GameLobbyScreen extends ConsumerWidget {
                   child: _ModeCard(
                     mode: mode,
                     canAfford: canAfford,
-                    onPlay: canAfford
-                        ? () => context.push(GameRoutes.matchmaking(gameCode), extra: mode)
-                        : () => context.push('/deposit'),
+                    onPlay: canAfford ? () => context.push(GameRoutes.matchmaking(gameCode), extra: mode) : () => context.push('/deposit'),
                   ),
                 );
               }),
@@ -216,9 +222,7 @@ class _JoinCodeDialogState extends ConsumerState<_JoinCodeDialog> {
           TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: const Text('Cancel')),
           FilledButton(
             onPressed: _busy ? null : _submit,
-            child: _busy
-                ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('Join'),
+            child: _busy ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Join'),
           ),
         ],
       );
@@ -350,5 +354,6 @@ class _LobbyError extends StatelessWidget {
 /// Square art for a game's hero card.
 Widget gameHeroArt(String gameCode) => switch (gameCode) {
       GameCodes.dama => const DamaBoardArt(),
+      GameCodes.karta => const KartaArt(),
       _ => const Icon(Icons.grid_view_rounded, size: 34),
     };

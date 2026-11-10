@@ -2,6 +2,7 @@
 /// `/<code>`, `/<code>/matchmaking`, `/<code>/match/:id`, `/<code>/result/:id`.
 abstract final class GameCodes {
   static const ludo = 'LUDO';
+  static const karta = 'KARTA';
   static const dama = 'DAMA';
 }
 
@@ -13,6 +14,7 @@ abstract final class GameRoutes {
 
   static String displayName(String gameCode) => switch (gameCode) {
         GameCodes.dama => 'Dama',
+        GameCodes.karta => 'Karta Lat Lat',
         _ => 'Ludo',
       };
 }

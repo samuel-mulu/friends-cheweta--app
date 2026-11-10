@@ -13,6 +13,7 @@ import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/game_hub/presentation/controllers/game_hub_controller.dart';
 import 'package:friends_game_app/features/game_hub/presentation/screens/game_lobby_screen.dart';
 import 'package:friends_game_app/features/history/presentation/screens/history_screen.dart';
+import 'package:friends_game_app/features/karta/presentation/screens/karta_match_screen.dart';
 import 'package:friends_game_app/features/history/presentation/screens/match_detail_screen.dart';
 import 'package:friends_game_app/features/history/presentation/screens/match_replay_screen.dart';
 import 'package:friends_game_app/features/home/presentation/screens/home_screen.dart';
@@ -93,6 +94,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       ],
       GoRoute(path: '/ludo/match/:matchId', builder: (_, state) => LudoMatchScreen(matchId: state.pathParameters['matchId'] ?? '')),
       GoRoute(path: '/dama/match/:matchId', builder: (_, state) => DamaMatchScreen(matchId: state.pathParameters['matchId'] ?? '')),
+      GoRoute(path: '/karta/match/:matchId', builder: (_, state) => KartaMatchScreen(matchId: state.pathParameters['matchId'] ?? '')),
       for (final code in liveGameCodes)
         GoRoute(
           path: '${GameRoutes.lobby(code)}/result/:matchId',

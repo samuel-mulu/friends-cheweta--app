@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/core/widgets/app_logo.dart';
 import 'package:friends_game_app/features/dama/presentation/widgets/dama_paint.dart';
+import 'package:friends_game_app/features/karta/presentation/widgets/karta_cards.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board_painter.dart';
 
-/// One entry in the games catalog. Ludo and Dama are live; the rest are announced.
+/// One entry in the games catalog. Live games open; the rest are announced.
 class GameCatalogEntry {
   const GameCatalogEntry({
     required this.code,
@@ -41,6 +42,13 @@ const gameCatalog = <GameCatalogEntry>[
     tagline: 'Coming soon',
     colors: [Color(0xFF7B2FF7), Color(0xFF3A0CA3)],
     icon: Icons.grid_on_rounded,
+  ),
+  GameCatalogEntry(
+    code: 'KARTA',
+    name: 'Karta Lat Lat',
+    tagline: 'Call it • Catch it',
+    colors: [Color(0xFF14704A), Color(0xFF07331F)],
+    route: '/karta',
   ),
   GameCatalogEntry(
     code: 'DAMA',
@@ -141,10 +149,14 @@ class GameTile extends StatelessWidget {
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(12),
-                      child: entry.code == 'LUDO' || entry.code == 'DAMA'
+                      child: entry.live
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(10),
-                              child: entry.code == 'LUDO' ? const CustomPaint(painter: LudoBoardPainter()) : const DamaBoardArt(),
+                              child: switch (entry.code) {
+                                'LUDO' => const CustomPaint(painter: LudoBoardPainter()),
+                                'KARTA' => const KartaArt(),
+                                _ => const DamaBoardArt(),
+                              },
                             )
                           : Icon(entry.icon, size: 44, color: Colors.white.withValues(alpha: entry.live ? 1 : 0.85)),
                     ),

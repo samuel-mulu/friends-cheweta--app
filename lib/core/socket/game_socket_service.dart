@@ -49,6 +49,13 @@ const _forwardedServerEvents = <String>[
   'dama:player_resigned',
   'dama:auto_played',
   'dama:strikes',
+  'karta:round_started',
+  'karta:rank_called',
+  'karta:card_flipped',
+  'karta:round_won',
+  'karta:player_resigned',
+  'karta:auto_played',
+  'karta:strikes',
 ];
 
 enum GameSocketStatus { disconnected, connecting, connected, recovering }

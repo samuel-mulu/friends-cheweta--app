@@ -5,6 +5,10 @@
 /// 64-char string: `.` empty, `l`/`L` light man/king, `d`/`D` dark man/king.
 library;
 
+import 'package:friends_game_app/features/match/domain/turn_timing.dart';
+
+export 'package:friends_game_app/features/match/domain/turn_timing.dart';
+
 enum DamaColor {
   light,
   dark;
@@ -187,24 +191,8 @@ class DamaGame {
       );
 }
 
-/// Per-move clock from the server.
-class DamaTiming {
-  const DamaTiming({this.version = 0, this.playerId, this.turnEndsAt, this.strikes = const {}, this.maxStrikes = 3});
-  final int version;
-  final String? playerId;
-  final DateTime? turnEndsAt;
-  final Map<String, int> strikes;
-  final int maxStrikes;
-
-  factory DamaTiming.fromJson(Map<String, dynamic> json) => DamaTiming(
-        version: _int(json['version']),
-        playerId: _optional(json['playerId']),
-        turnEndsAt: DateTime.tryParse(json['turnEndsAt']?.toString() ?? ''),
-        strikes: (json['strikes'] is Map ? Map<String, dynamic>.from(json['strikes'] as Map) : const <String, dynamic>{})
-            .map((key, value) => MapEntry(key, _int(value))),
-        maxStrikes: json['maxStrikes'] == null ? 3 : _int(json['maxStrikes']),
-      );
-}
+/// Dama's move clock is the shared turn clock.
+typedef DamaTiming = TurnTiming;
 
 class DamaParticipant {
   const DamaParticipant({required this.userId, required this.fullName, this.color});

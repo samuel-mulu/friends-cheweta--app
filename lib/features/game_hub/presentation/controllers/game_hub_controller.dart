@@ -6,7 +6,10 @@ import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 
 /// Games with a live lobby, in hub order.
-const liveGameCodes = [GameCodes.ludo, GameCodes.dama];
+const liveGameCodes = [GameCodes.ludo, GameCodes.karta, GameCodes.dama];
+
+/// Games with practice against the computer.
+const practiceGameCodes = {GameCodes.ludo, GameCodes.dama};
 
 class GameHubState {
   const GameHubState({
