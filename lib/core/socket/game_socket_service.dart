@@ -44,6 +44,11 @@ const _forwardedServerEvents = <String>[
   'ludo:player_resigned',
   'ludo:auto_played',
   'ludo:strikes',
+  'dama:piece_moved',
+  'dama:turn_started',
+  'dama:player_resigned',
+  'dama:auto_played',
+  'dama:strikes',
 ];
 
 enum GameSocketStatus { disconnected, connecting, connected, recovering }

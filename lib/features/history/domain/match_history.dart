@@ -47,6 +47,8 @@ class MatchHistoryItem {
     this.settlement,
     this.winnerOrder = const [],
     this.source,
+    this.isDraw = false,
+    this.gameCode,
   });
 
   final String id;
@@ -64,6 +66,12 @@ class MatchHistoryItem {
   final DateTime? finishedAt;
   final MatchSettlementSummary? settlement;
   final List<String> winnerOrder;
+
+  /// Finished without a winner (Dama draw rule); stakes were returned.
+  final bool isDraw;
+
+  /// LUDO | DAMA (from `game.code`).
+  final String? gameCode;
 
   factory MatchHistoryItem.fromJson(Map<String, dynamic> json) {
     final game = json['game'] is Map ? Map<String, dynamic>.from(json['game'] as Map) : const <String, dynamic>{};
@@ -85,6 +93,8 @@ class MatchHistoryItem {
       settlement: settlementJson is Map ? MatchSettlementSummary.fromJson(Map<String, dynamic>.from(settlementJson)) : null,
       winnerOrder: (json['winnerOrder'] as List? ?? const []).map((e) => e.toString()).toList(),
       source: json['source']?.toString(),
+      isDraw: json['isDraw'] == true,
+      gameCode: game['code']?.toString(),
     );
   }
 

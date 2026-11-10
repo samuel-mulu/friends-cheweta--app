@@ -8,6 +8,7 @@ import 'package:friends_game_app/features/auth/presentation/screens/register_scr
 import 'package:friends_game_app/features/auth/presentation/screens/splash_screen.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
 import 'package:friends_game_app/features/game_hub/presentation/screens/game_hub_screen.dart';
+import 'package:friends_game_app/features/dama/presentation/screens/dama_match_screen.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/game_hub/presentation/controllers/game_hub_controller.dart';
 import 'package:friends_game_app/features/game_hub/presentation/screens/game_lobby_screen.dart';
@@ -18,7 +19,7 @@ import 'package:friends_game_app/features/home/presentation/screens/home_screen.
 import 'package:friends_game_app/features/chat/presentation/screens/chats_screen.dart';
 import 'package:friends_game_app/features/chat/presentation/screens/direct_chat_screen.dart';
 import 'package:friends_game_app/features/ludo/presentation/screens/ludo_match_screen.dart';
-import 'package:friends_game_app/features/ludo/presentation/screens/ludo_result_screen.dart';
+import 'package:friends_game_app/features/match/presentation/screens/match_result_screen.dart';
 import 'package:friends_game_app/features/live_lobby/presentation/screens/live_lobby_screen.dart';
 import 'package:friends_game_app/features/notifications/presentation/screens/notifications_screen.dart';
 import 'package:friends_game_app/features/payments/presentation/screens/deposit_screen.dart';
@@ -78,7 +79,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ],
       GoRoute(path: '/ludo/match/:matchId', builder: (_, state) => LudoMatchScreen(matchId: state.pathParameters['matchId'] ?? '')),
-      GoRoute(path: '/ludo/result/:matchId', builder: (_, state) => LudoResultScreen(matchId: state.pathParameters['matchId'] ?? '')),
+      GoRoute(path: '/dama/match/:matchId', builder: (_, state) => DamaMatchScreen(matchId: state.pathParameters['matchId'] ?? '')),
+      for (final code in liveGameCodes)
+        GoRoute(
+          path: '${GameRoutes.lobby(code)}/result/:matchId',
+          builder: (_, state) => MatchResultScreen(gameCode: code, matchId: state.pathParameters['matchId'] ?? ''),
+        ),
       GoRoute(path: '/history/:matchId', builder: (_, state) => MatchDetailScreen(matchId: state.pathParameters['matchId'] ?? '')),
       GoRoute(path: '/history/:matchId/replay', builder: (_, state) => MatchReplayScreen(matchId: state.pathParameters['matchId'] ?? '')),
     ],

@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/core/widgets/app_logo.dart';
+import 'package:friends_game_app/features/dama/presentation/widgets/dama_paint.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board_painter.dart';
 
-/// One entry in the games catalog. Ludo is live; the rest are announced.
+/// One entry in the games catalog. Ludo and Dama are live; the rest are announced.
 class GameCatalogEntry {
   const GameCatalogEntry({
     required this.code,
@@ -42,11 +43,11 @@ const gameCatalog = <GameCatalogEntry>[
     icon: Icons.grid_on_rounded,
   ),
   GameCatalogEntry(
-    code: 'CHECKERS',
-    name: 'Checkers',
-    tagline: 'Coming soon',
-    colors: [Color(0xFF8D5524), Color(0xFF4E2A10)],
-    icon: Icons.grid_4x4_rounded,
+    code: 'DAMA',
+    name: 'Dama',
+    tagline: 'Ethiopian • Flying kings',
+    colors: [Color(0xFF8D5524), Color(0xFF3B1F0E)],
+    route: '/dama',
   ),
   GameCatalogEntry(
     code: 'CARDS',
@@ -140,10 +141,10 @@ class GameTile extends StatelessWidget {
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(12),
-                      child: entry.code == 'LUDO'
+                      child: entry.code == 'LUDO' || entry.code == 'DAMA'
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(10),
-                              child: const CustomPaint(painter: LudoBoardPainter()),
+                              child: entry.code == 'LUDO' ? const CustomPaint(painter: LudoBoardPainter()) : const DamaBoardArt(),
                             )
                           : Icon(entry.icon, size: 44, color: Colors.white.withValues(alpha: entry.live ? 1 : 0.85)),
                     ),

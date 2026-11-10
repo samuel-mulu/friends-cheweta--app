@@ -8,6 +8,7 @@ import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/core/theme/app_theme.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/chat/application/match_chat_controller.dart';
+import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_feedback.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
@@ -19,7 +20,7 @@ import 'package:friends_game_app/features/ludo/presentation/match_presenter.dart
 import 'package:friends_game_app/features/match/presentation/widgets/celebration.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_seat.dart';
-import 'package:friends_game_app/features/match/presentation/widgets/match_chat_sheet.dart';
+import 'package:friends_game_app/features/match/presentation/match_sheets.dart';
 import 'package:friends_game_app/features/match/presentation/widgets/match_chrome.dart';
 import 'package:friends_game_app/features/match/presentation/widgets/table_backdrop.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/turn_banner.dart';
@@ -279,8 +280,8 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                     soundOn: soundOn,
                     recovering: match.recovering,
                     onExit: () => _confirmExit(context, game),
-                    onChat: () => _openChat(context),
-                    onReact: () => _openReactions(context),
+                    onChat: () => openMatchChat(context, ref),
+                    onReact: () => showMatchReactionPicker(context, ref),
                     onToggleSound: () => ref.read(playerPreferencesProvider.notifier).setSound(!soundOn),
                     onMenu: () => _openMenu(context, match),
                   ),
@@ -340,7 +341,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                       if (game.phase == LudoMatchPhase.finished && !animation.busy) ...[
                         const SizedBox(height: 8),
                         FilledButton.icon(
-                          onPressed: () => context.pushReplacement('/ludo/result/${widget.matchId}'),
+                          onPressed: () => context.pushReplacement(GameRoutes.result(GameCodes.ludo, widget.matchId)),
                           icon: const Icon(Icons.emoji_events_outlined),
                           label: const Text('View result'),
                         ),
@@ -366,24 +367,10 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
 
   Future<void> _confirmExit(BuildContext context, LudoGameState game) async {
     if (game.phase == LudoMatchPhase.finished) {
-      context.pushReplacement('/ludo/result/${widget.matchId}');
+      context.pushReplacement(GameRoutes.result(GameCodes.ludo, widget.matchId));
       return;
     }
-    final leave = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Leave the match?'),
-        content: const Text('Leaving now forfeits this match and your stake.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep playing')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Leave'),
-          ),
-        ],
-      ),
-    );
+    final leave = await confirmLeaveMatch(context);
     if (leave != true || !context.mounted) return;
     final ok = await ref.read(ludoMatchControllerProvider.notifier).resign();
     if (ok && context.mounted) context.go('/home');
@@ -402,43 +389,6 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       ),
     );
     if (confirmed == true) await ref.read(ludoMatchControllerProvider.notifier).resign();
-  }
-
-  Future<void> _openReactions(BuildContext context) async {
-    final reaction = await showModalBottomSheet<MatchReaction>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              for (final r in MatchReaction.values)
-                ActionChip(
-                  label: Text(r.display, style: TextStyle(fontSize: r.isEmoji ? 22 : 14, fontWeight: FontWeight.w700)),
-                  onPressed: () => Navigator.pop(context, r),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (reaction != null) await ref.read(matchReactionsProvider.notifier).send(reaction);
-  }
-
-  Future<void> _openChat(BuildContext context) async {
-    final controller = ref.read(matchChatControllerProvider.notifier);
-    controller.setPanelOpen(true);
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => const MatchChatSheet(),
-    );
-    controller.setPanelOpen(false);
   }
 
   Future<void> _openMenu(BuildContext context, LudoMatchViewState match) async {

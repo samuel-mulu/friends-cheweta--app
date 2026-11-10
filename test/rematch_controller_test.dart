@@ -2,7 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
-import 'package:friends_game_app/features/ludo/application/rematch_controller.dart';
+import 'package:friends_game_app/features/match/application/rematch_controller.dart';
 import 'support/fake_socket.dart';
 
 Map<String, dynamic> _offer({String challenger = 'me', String opponent = 'other', String source = 'old'}) => {

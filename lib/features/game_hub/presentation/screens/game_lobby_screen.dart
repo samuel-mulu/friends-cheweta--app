@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/core/theme/app_spacing.dart';
 import 'package:friends_game_app/core/utils/money_formatter.dart';
+import 'package:friends_game_app/features/dama/presentation/screens/dama_match_screen.dart';
+import 'package:friends_game_app/features/dama/presentation/widgets/dama_paint.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/game_hub/presentation/controllers/game_hub_controller.dart';
@@ -69,6 +71,19 @@ class GameLobbyScreen extends ConsumerWidget {
                 onTap: () => showPracticeSheet(context, ref, gameCode: gameCode),
               ),
             ),
+            if (gameCode == GameCodes.dama) ...[
+              const SizedBox(height: 8),
+              Card(
+                clipBehavior: Clip.antiAlias,
+                child: ListTile(
+                  leading: const CircleAvatar(child: Icon(Icons.menu_book_outlined)),
+                  title: const Text('How to play', style: TextStyle(fontWeight: FontWeight.w800)),
+                  subtitle: const Text('Compulsory capture, flying kings'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => showDamaRules(context),
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
             Row(
               children: [
@@ -334,5 +349,6 @@ class _LobbyError extends StatelessWidget {
 
 /// Square art for a game's hero card.
 Widget gameHeroArt(String gameCode) => switch (gameCode) {
+      GameCodes.dama => const DamaBoardArt(),
       _ => const Icon(Icons.grid_view_rounded, size: 34),
     };

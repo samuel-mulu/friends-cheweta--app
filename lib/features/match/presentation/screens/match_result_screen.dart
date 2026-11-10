@@ -5,20 +5,23 @@ import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/core/utils/money_formatter.dart';
 import 'package:friends_game_app/core/widgets/app_error_view.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/history/presentation/controllers/match_history_controller.dart';
 import 'package:friends_game_app/features/match/application/practice_launcher.dart';
-import 'package:friends_game_app/features/ludo/application/rematch_controller.dart';
+import 'package:friends_game_app/features/match/application/rematch_controller.dart';
 import 'package:friends_game_app/features/wallet/presentation/controllers/wallet_controller.dart';
 
-class LudoResultScreen extends ConsumerStatefulWidget {
-  const LudoResultScreen({super.key, required this.matchId});
+/// Result of any game: outcome, settlement, rematch or play again.
+class MatchResultScreen extends ConsumerStatefulWidget {
+  const MatchResultScreen({super.key, required this.gameCode, required this.matchId});
+  final String gameCode;
   final String matchId;
 
   @override
-  ConsumerState<LudoResultScreen> createState() => _LudoResultScreenState();
+  ConsumerState<MatchResultScreen> createState() => _MatchResultScreenState();
 }
 
-class _LudoResultScreenState extends ConsumerState<LudoResultScreen> {
+class _MatchResultScreenState extends ConsumerState<MatchResultScreen> {
   Timer? _poller;
   int _polls = 0;
 
@@ -54,7 +57,7 @@ class _LudoResultScreenState extends ConsumerState<LudoResultScreen> {
     final detail = ref.watch(matchDetailProvider(widget.matchId));
     final me = ref.watch(authControllerProvider).user?.id;
     ref.listen(rematchControllerProvider.select((s) => s.newMatchId), (previous, next) {
-      if (next != null && next != previous) context.go('/ludo/match/$next');
+      if (next != null && next != previous) context.go(GameRoutes.match(widget.gameCode, next));
     });
     return Scaffold(
       appBar: AppBar(automaticallyImplyLeading: false, title: const Text('Match result')),
@@ -80,7 +83,8 @@ class _LudoResultScreenState extends ConsumerState<LudoResultScreen> {
         },
         data: (match) {
           final mine = me == null ? null : match.participant(me);
-          final won = mine?.resultPosition == 1 || (match.winnerOrder.isNotEmpty && match.winnerOrder.first == me);
+          final draw = match.isDraw;
+          final won = !draw && (mine?.resultPosition == 1 || (match.winnerOrder.isNotEmpty && match.winnerOrder.first == me));
           final settlement = match.settlement;
           final processing = match.status == 'FINISHING' || settlement == null;
           return SafeArea(
@@ -88,11 +92,22 @@ class _LudoResultScreenState extends ConsumerState<LudoResultScreen> {
               padding: const EdgeInsets.all(24),
               children: [
                 const SizedBox(height: 20),
-                CircleAvatar(radius: 38, child: Icon(won ? Icons.emoji_events_rounded : Icons.sports_esports_rounded, size: 38)),
+                CircleAvatar(
+                  radius: 38,
+                  child: Icon(draw ? Icons.handshake_outlined : won ? Icons.emoji_events_rounded : Icons.sports_esports_rounded, size: 38),
+                ),
                 const SizedBox(height: 18),
-                Text(won ? 'Victory' : 'Match complete', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineMedium),
+                Text(draw ? 'Draw' : won ? 'Victory' : 'Match complete', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineMedium),
                 const SizedBox(height: 6),
-                Text(won ? 'Your result is confirmed by the server.' : 'The server has confirmed the final result.', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
+                Text(
+                  draw
+                      ? 'No winner this time. Stakes are returned to both players.'
+                      : won
+                          ? 'Your result is confirmed by the server.'
+                          : 'The server has confirmed the final result.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
                 const SizedBox(height: 28),
                 if (match.isPractice)
                   const Card(
@@ -110,8 +125,12 @@ class _LudoResultScreenState extends ConsumerState<LudoResultScreen> {
                         _ResultRow(label: 'Stake', value: MoneyFormatter.minorToEtb(BigInt.from(match.stakeAmountMinor))),
                         if (settlement != null) ...[
                           _ResultRow(label: 'Pot', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.potAmountMinor))),
-                          _ResultRow(label: 'Platform fee', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.platformFeeMinor))),
-                          _ResultRow(label: 'Winner payout', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.payoutAmountMinor))),
+                          if (draw)
+                            const _ResultRow(label: 'Stakes', value: 'Returned')
+                          else ...[
+                            _ResultRow(label: 'Platform fee', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.platformFeeMinor))),
+                            _ResultRow(label: 'Winner payout', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.payoutAmountMinor))),
+                          ],
                         ],
                       ]),
                     ),
@@ -139,13 +158,17 @@ class _LudoResultScreenState extends ConsumerState<LudoResultScreen> {
                 ],
                 const SizedBox(height: 24),
                 if (match.isPractice) ...[
-                  _PlayAgainCard(),
+                  _PlayAgainCard(gameCode: widget.gameCode),
                   const SizedBox(height: 16),
                 ] else if (match.status == 'FINISHED' && me != null) ...[
                   _RematchCard(me: me),
                   const SizedBox(height: 16),
                 ],
-                FilledButton.tonalIcon(onPressed: () => context.go('/ludo'), icon: const Icon(Icons.groups_rounded), label: const Text('Find another player')),
+                FilledButton.tonalIcon(
+                  onPressed: () => context.go(GameRoutes.lobby(widget.gameCode)),
+                  icon: const Icon(Icons.groups_rounded),
+                  label: const Text('Find another player'),
+                ),
                 const SizedBox(height: 10),
                 OutlinedButton(onPressed: () => context.go('/home'), child: const Text('Back to home')),
                 const SizedBox(height: 10),
@@ -229,6 +252,9 @@ class _RematchCard extends ConsumerWidget {
 
 /// Practice: start another game against the computer (same level by default).
 class _PlayAgainCard extends ConsumerWidget {
+  const _PlayAgainCard({required this.gameCode});
+  final String gameCode;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final level = ref.watch(lastPracticeLevelProvider);
@@ -237,12 +263,14 @@ class _PlayAgainCard extends ConsumerWidget {
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           FilledButton.icon(
-            onPressed: () => level == null ? showPracticeSheet(context, ref) : startPractice(context, ref, level),
+            onPressed: () => level == null
+                ? showPracticeSheet(context, ref, gameCode: gameCode)
+                : startPractice(context, ref, level, gameCode: gameCode),
             icon: const Icon(Icons.replay_rounded),
             label: Text(level == null ? 'Play again' : 'Play again (${level.label})'),
           ),
           if (level != null)
-            TextButton(onPressed: () => showPracticeSheet(context, ref), child: const Text('Change level')),
+            TextButton(onPressed: () => showPracticeSheet(context, ref, gameCode: gameCode), child: const Text('Change level')),
         ]),
       ),
     );
