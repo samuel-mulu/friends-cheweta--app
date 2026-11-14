@@ -1,34 +1,41 @@
-import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
-import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
-import 'package:friends_game_app/features/ludo/domain/ludo_motion.dart';
+import 'package:friends_game_app/features/ludo/application/ludo_timeline_controller.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_token.dart';
 import 'support/fake_socket.dart';
+import 'support/ludo_fixtures.dart';
 
-Map<String, dynamic> _joinAck() => {
+Map<String, dynamic> _joinAck({int version = 5}) => {
       'ok': true,
       'state': {
         'game': {
+          'rulesVersion': 'LUDO_CLASSIC_V3',
           'matchId': 'm1',
-          'version': 5,
+          'version': version,
           'phase': 'PLAYING',
           'turnPhase': 'WAITING_FOR_ROLL',
           'currentPlayerId': 'me',
           'legalTokenIds': [],
-          'players': [],
+          'players': [
+            {
+              'userId': 'me',
+              'color': 'RED',
+              'tokens': [tokenJson('RED-1', 'me', 'RED', 3), tokenJson('RED-2', 'me', 'RED', -1)],
+            },
+          ],
         },
         'startingRoll': {'round': 1, 'candidatePlayerIds': [], 'rolls': {}},
         'resignedPlayerIds': [],
       },
-      'timing': {'matchId': 'm1', 'version': 5, 'turnPhase': 'WAITING_FOR_ROLL', 'consecutiveTimeoutsByPlayer': {}},
+      'timing': {'matchId': 'm1', 'version': version, 'turnPhase': 'WAITING_FOR_ROLL', 'consecutiveTimeoutsByPlayer': {}},
       'participants': [],
+      'board': {'trackLength': 52, 'lapSquares': 51, 'homeColumnLength': 5},
     };
 
 Widget _board(List<LudoBoardTokenView> tokens, {VoidCallback? onBoardTap}) => MaterialApp(
@@ -74,41 +81,6 @@ void main() {
     });
   });
 
-  group('presentation queue', () {
-    late ProviderContainer container;
-    setUp(() => container = ProviderContainer());
-    tearDown(() => container.dispose());
-
-    test('turn notices never block input; dice and moves do', () {
-      fakeAsync((async) {
-        final queue = container.read(ludoAnimationQueueProvider.notifier);
-        queue.enqueue(const LudoPresentationEvent(kind: LudoPresentationKind.turn, playerId: 'me'));
-        expect(container.read(ludoAnimationQueueProvider).blocking, isFalse);
-        queue.enqueue(const LudoPresentationEvent(kind: LudoPresentationKind.dice, playerId: 'me', diceValue: 4));
-        expect(container.read(ludoAnimationQueueProvider).blocking, isTrue); // queued dice blocks
-        async.elapse(const Duration(seconds: 2));
-        expect(container.read(ludoAnimationQueueProvider).blocking, isFalse);
-        expect(container.read(ludoAnimationQueueProvider).busy, isFalse);
-      });
-    });
-
-    test('clear() during a drain never lets the old loop end the new presentation early', () {
-      fakeAsync((async) {
-        final queue = container.read(ludoAnimationQueueProvider.notifier);
-        final dice = LudoMotion.diceRoll;
-        queue.enqueue(const LudoPresentationEvent(kind: LudoPresentationKind.dice, playerId: 'me', diceValue: 6));
-        async.elapse(dice - const Duration(milliseconds: 60));
-        queue.clear(); // e.g. a recovery snapshot arrived
-        queue.enqueue(const LudoPresentationEvent(kind: LudoPresentationKind.turn, playerId: 'p2'));
-        // The old dice loop wakes up now; the turn notice (120 ms) must still be showing.
-        async.elapse(const Duration(milliseconds: 70));
-        expect(container.read(ludoAnimationQueueProvider).current?.kind, LudoPresentationKind.turn);
-        async.elapse(const Duration(milliseconds: 100));
-        expect(container.read(ludoAnimationQueueProvider).busy, isFalse);
-      });
-    });
-  });
-
   group('commands fail fast', () {
     late FakeSocket socket;
     late ProviderContainer container;
@@ -122,6 +94,7 @@ void main() {
     tearDown(() => container.dispose());
 
     LudoMatchViewState state() => container.read(ludoMatchControllerProvider);
+    LudoTimelineState timeline() => container.read(ludoTimelineProvider);
 
     test('a disconnected tap is rejected at once with a clear message, never left pending', () async {
       socket.reply = (event, _) => event == 'ludo:roll' ? {'ok': false, 'code': 'SOCKET_DISCONNECTED'} : _joinAck();
@@ -129,6 +102,7 @@ void main() {
       expect(await container.read(ludoMatchControllerProvider.notifier).roll(), isFalse);
       expect(state().pendingCommandId, isNull);
       expect(state().error, contains('Reconnecting'));
+      expect(timeline().spinningPlayerId, isNull, reason: 'a rejected roll stops the optimistic spin');
     });
 
     test('a timed-out command resyncs from the server instead of guessing', () async {
@@ -139,6 +113,56 @@ void main() {
       await flush();
       expect(socket.sent, ['ludo:roll', 'match:join', 'ludo:sync']); // one send, no blind retry
       expect(state().pendingCommandId, isNull);
+    });
+
+    test('joining seeds the timeline with the server board, and events flow through it', () async {
+      socket.reply = (_, __) => _joinAck();
+      await container.read(ludoMatchControllerProvider.notifier).join('m1');
+      expect(timeline().presented?.game.version, 5);
+      expect(timeline().presented?.board.lapSquares, 51);
+
+      socket.push('ludo:dice_rolled', {'type': 'DICE_ROLLED', 'playerId': 'me', 'diceValue': 6}, matchId: 'm1', version: 6);
+      await flush();
+      // Authoritative state moved on; the board shows the dice scene first.
+      expect(state().snapshot?.game.diceValue, 6);
+      expect(timeline().busy, isTrue);
+      expect(timeline().presentedDice['me'], 6);
+    });
+
+    test('recovery replaces the board as is and drops stale scenes', () async {
+      socket.reply = (event, _) => event == 'ludo:sync' ? _joinAck(version: 9) : _joinAck();
+      await container.read(ludoMatchControllerProvider.notifier).join('m1');
+      socket.push('ludo:dice_rolled', {'type': 'DICE_ROLLED', 'playerId': 'me', 'diceValue': 6}, matchId: 'm1', version: 6);
+      await flush();
+      expect(timeline().busy, isTrue);
+
+      await container.read(ludoMatchControllerProvider.notifier).recover();
+      expect(timeline().busy, isFalse);
+      expect(timeline().presented?.game.version, 9);
+      expect(state().snapshot?.game.version, 9);
+    });
+
+    test('a malformed event does not kill the stream: it triggers a resync', () async {
+      socket.reply = (_, __) => _joinAck();
+      await container.read(ludoMatchControllerProvider.notifier).join('m1');
+      socket.sent.clear();
+      socket.push(
+        'ludo:token_moved',
+        {
+          'type': 'TOKEN_MOVED',
+          'playerId': 'me',
+          'move': {'playerId': 'me', 'diceValue': 1, 'tokenBefore': {'color': 'PURPLE'}, 'tokenAfter': {'color': 'PURPLE'}},
+        },
+        matchId: 'm1',
+        version: 6,
+      );
+      await flush();
+      await flush();
+      expect(socket.sent, ['match:join', 'ludo:sync']);
+      // Still alive afterwards.
+      socket.push('ludo:dice_rolled', {'type': 'DICE_ROLLED', 'playerId': 'me', 'diceValue': 2}, matchId: 'm1', version: 6);
+      await flush();
+      expect(state().snapshot?.game.diceValue, 2);
     });
   });
 }

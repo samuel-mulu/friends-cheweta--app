@@ -9,9 +9,10 @@ import 'package:friends_game_app/core/theme/app_theme.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/chat/application/match_chat_controller.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
-import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_feedback.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
+import 'package:friends_game_app/features/ludo/application/ludo_scene.dart';
+import 'package:friends_game_app/features/ludo/application/ludo_timeline_controller.dart';
 import 'package:friends_game_app/features/match/application/match_reactions_controller.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_seats.dart';
@@ -29,7 +30,7 @@ import 'package:friends_game_app/features/profile/presentation/controllers/prefe
 /// In-match screen. Layout works for 2, 3 or 4 players: the board is rotated
 /// so the viewer's color sits bottom-left, and every player has a corner seat
 /// (avatar, turn ring, own dice). All game outcomes come from the server; the
-/// screen only presents them, in order, via the animation queue.
+/// screen only presents them, in order, through the timeline.
 class LudoMatchScreen extends ConsumerStatefulWidget {
   const LudoMatchScreen({super.key, required this.matchId});
   final String matchId;
@@ -41,21 +42,7 @@ class LudoMatchScreen extends ConsumerStatefulWidget {
 class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsBindingObserver {
   String? _pendingTokenId;
 
-  /// Per-player dice presentation counters: only ever increase, so a die
-  /// animates for its own owner's rolls and nothing else.
-  final Map<String, int> _diceKeys = {};
-
-  /// Last face *presented* per player (the controller may already know a
-  /// newer one that is still queued; showing it early would spoil the roll).
-  final Map<String, int> _presentedDice = {};
-
-  /// My die spins from the tap until my roll is presented (or rejected).
-  bool _mySpin = false;
-
-  /// Presented rolls per player, newest first (shown as small faces).
-  final Map<String, List<int>> _rollHistory = {};
-
-  /// Last token-home confetti (color + presentation sequence).
+  /// Last token-home confetti (color + timeline sequence).
   ({LudoColor color, int seq})? _homeBurst;
 
   /// Full-screen win moment, shown once when the result is presented.
@@ -65,6 +52,9 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
   /// Short explanation after a tap that could not act (never fail silently).
   String? _nudge;
   Timer? _nudgeTimer;
+
+  /// "Your turn" is pinged once per turn, keyed by match + state version.
+  String? _lastTurnPing;
 
   @override
   void initState() {
@@ -91,6 +81,8 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     super.dispose();
   }
 
+  String? get _me => ref.read(authControllerProvider).user?.id;
+
   /// The board was tapped where nothing can act: say why (never fail silently).
   void _explainTap(String? text) {
     if (text == null) return;
@@ -102,42 +94,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     });
   }
 
-  void _onPresentation(LudoAnimationState? previous, LudoAnimationState next) {
-    final event = next.current;
-    if (event == null || next.sequence == previous?.sequence) return;
-    final me = ref.read(authControllerProvider).user?.id;
-    final snapshot = ref.read(ludoMatchControllerProvider).snapshot;
-
-    if (event.kind == LudoPresentationKind.dice && event.playerId != null) {
-      setState(() {
-        _diceKeys[event.playerId!] = next.sequence;
-        if (event.diceValue != null) {
-          _presentedDice[event.playerId!] = event.diceValue!;
-          _rollHistory[event.playerId!] = [event.diceValue!, ...?_rollHistory[event.playerId!]].take(3).toList();
-        }
-        if (event.playerId == me) _mySpin = false;
-      });
-    }
-
-    if (event.kind == LudoPresentationKind.finish && event.tokenId != null) {
-      final color = snapshot?.game.tokenById(event.tokenId!)?.color;
-      if (color != null) setState(() => _homeBurst = (color: color, seq: next.sequence));
-    }
-    if (event.kind == LudoPresentationKind.matchFinished && !_celebrating) {
-      setState(() => _celebrating = true);
-      _celebrationTimer?.cancel();
-      _celebrationTimer = Timer(const Duration(milliseconds: 2800), _endCelebration);
-    }
-
-    final feedback = feedbackFor(
-      event,
-      me: me,
-      winnerOrder: snapshot?.game.winnerOrder ?? const [],
-      tokenOwners: {
-        for (final player in snapshot?.game.players ?? const <LudoPlayerState>[])
-          for (final token in player.tokens) token.id: token.ownerId,
-      },
-    );
+  void _play(LudoFeedback feedback) {
     if (feedback.sound != null) ref.read(gameSoundServiceProvider).play(feedback.sound!, volume: feedback.volume);
     if (!ref.read(playerPreferencesProvider).hapticsEnabled) return;
     switch (feedback.haptic) {
@@ -150,6 +107,46 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       case null:
         break;
     }
+  }
+
+  /// A scene started (or the timeline went idle): sounds, bursts, celebration.
+  void _onTimeline(LudoTimelineState? previous, LudoTimelineState next) {
+    if (previous != null && next.epoch != previous.epoch) {
+      // Recovery / rejoin: whatever was mid-flight is gone, including the win moment.
+      _celebrationTimer?.cancel();
+      if (_celebrating || _homeBurst != null) {
+        setState(() {
+          _celebrating = false;
+          _homeBurst = null;
+        });
+      }
+    }
+    final scene = next.current;
+    if (scene != null && next.sequence != previous?.sequence) {
+      _play(sceneStartFeedback(scene, me: _me, fromOptimisticTap: next.currentFromOptimisticTap));
+      if (scene is LudoFinishScene) {
+        final color = next.presented?.game.tokenById(scene.tokenId)?.color;
+        if (color != null) setState(() => _homeBurst = (color: color, seq: next.sequence));
+      }
+      if (scene is LudoMatchEndScene && !_celebrating) {
+        setState(() => _celebrating = true);
+        _celebrationTimer?.cancel();
+        _celebrationTimer = Timer(const Duration(milliseconds: 2800), _endCelebration);
+      }
+    }
+    _maybePingMyTurn();
+  }
+
+  void _maybePingMyTurn() {
+    final timeline = ref.read(ludoTimelineProvider);
+    final match = ref.read(ludoMatchControllerProvider);
+    final game = match.snapshot?.game;
+    if (game == null) return;
+    if (!shouldPingMyTurn(authoritative: game, timelineIdle: timeline.idle, me: _me)) return;
+    final key = '${match.matchId}:${game.version}';
+    if (_lastTurnPing == key) return;
+    _lastTurnPing = key;
+    _play(const LudoFeedback(sound: GameSound.yourTurn, haptic: LudoHaptic.light));
   }
 
   void _endCelebration() {
@@ -168,23 +165,30 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
 
   Future<void> _rollMine({required bool startRoll}) async {
     _tick();
-    setState(() => _mySpin = true);
+    // The die clicks and spins at the tap; the server's face lands when its scene plays.
+    ref.read(gameSoundServiceProvider).play(GameSound.diceRoll);
     final controller = ref.read(ludoMatchControllerProvider.notifier);
-    final ok = startRoll ? await controller.rollForStart() : await controller.roll();
-    if (!ok && mounted) setState(() => _mySpin = false);
+    if (startRoll) {
+      await controller.rollForStart();
+    } else {
+      await controller.roll();
+    }
   }
+
+  void _completeScene(int sequence) => ref.read(ludoTimelineProvider.notifier).completeScene(sequence);
 
   @override
   Widget build(BuildContext context) {
-    ref.listen(ludoAnimationQueueProvider, _onPresentation);
+    ref.listen(ludoTimelineProvider, _onTimeline);
+    ref.listen(ludoMatchControllerProvider.select((s) => s.snapshot?.game.version), (_, __) => _maybePingMyTurn());
     ref.listen(matchReactionsProvider, (previous, next) {
-      final me = ref.read(authControllerProvider).user?.id;
+      final me = _me;
       final fresh = next.entries.any((e) => e.key != me && previous?[e.key]?.seq != e.value.seq);
-      if (fresh) ref.read(gameSoundServiceProvider).play(GameSound.safe, volume: 0.45);
+      if (fresh) ref.read(gameSoundServiceProvider).play(GameSound.tick, volume: 0.5);
     });
     ref.listen(ludoMatchControllerProvider.select((s) => s.autoPlayNotice), (previous, next) {
       if (next == null || next.seq == previous?.seq) return;
-      final me = ref.read(authControllerProvider).user?.id;
+      final me = _me;
       final left = next.maxStrikes - next.strikes;
       final name = ref
               .read(ludoMatchControllerProvider)
@@ -204,9 +208,9 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
     final match = ref.watch(ludoMatchControllerProvider);
     final me = ref.watch(authControllerProvider.select((auth) => auth.user?.id));
     final socket = ref.watch(gameSocketStatusProvider);
-    final animation = ref.watch(ludoAnimationQueueProvider);
+    final timeline = ref.watch(ludoTimelineProvider);
     final chat = ref.watch(matchChatControllerProvider);
-    ref.watch(matchReactionsProvider); // seats show live reactions
+    final reactions = ref.watch(matchReactionsProvider);
     final prefs = ref.watch(playerPreferencesProvider);
     final soundOn = prefs.soundEnabled;
     final snapshot = match.snapshot;
@@ -241,26 +245,29 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       );
     }
 
-    final game = snapshot.game;
     final view = MatchPresenter(
       match: match,
+      timeline: timeline,
       me: me,
-      animation: animation,
       connected: socket == GameSocketStatus.connected,
       pendingTokenId: _pendingTokenId,
     );
+    final game = view.game;
     final seats = view.seats(
-      SeatPresentation(
-        presentedDice: _presentedDice,
-        diceKeys: _diceKeys,
-        rollHistory: _rollHistory,
-        reactions: ref.read(matchReactionsProvider),
-        mySpin: _mySpin,
-      ),
+      reactions: reactions,
       onRoll: (startRoll) => _rollMine(startRoll: startRoll),
+      onDiceSettled: _completeScene,
     );
     LudoSeatView? seatAt(LudoCorner corner) => seats.where((seat) => seat.corner == corner).firstOrNull;
     final hint = _nudge ?? view.hint;
+
+    final tokenOwners = {
+      for (final player in view.game.players)
+        for (final token in player.tokens) token.id: token.ownerId,
+    };
+    final walking = view.walking;
+    final capturing = view.capturing;
+    final sequence = timeline.sequence;
 
     // The match is always presented on the dark game table, regardless of the
     // app theme, like a dedicated game screen.
@@ -302,10 +309,29 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                             child: Center(
                               child: LudoBoard(
                                 tokens: view.tokens(onMove: _moveToken),
+                                board: view.board,
                                 orientation: view.orientation,
-                                animatedMove: view.walkingMove,
-                                animationSequence: animation.sequence,
-                                onStep: () => ref.read(gameSoundServiceProvider).play(GameSound.step, volume: 0.5),
+                                walk: walking == null
+                                    ? null
+                                    : LudoWalkPresentation(
+                                        move: walking.move,
+                                        path: walking.path,
+                                        sequence: sequence,
+                                        duration: timeline.scale(walking.nominal),
+                                        onStep: (_) => _play(stepFeedback(walking, me: me)),
+                                        onCompleted: () {
+                                          _play(landingFeedback(walking, me: me, board: view.board, tokenOwners: tokenOwners));
+                                          _completeScene(sequence);
+                                        },
+                                      ),
+                                capture: capturing == null
+                                    ? null
+                                    : LudoCapturePresentation(
+                                        tokenIds: capturing.capturedTokenIds,
+                                        sequence: sequence,
+                                        duration: timeline.scale(capturing.nominal),
+                                        onCompleted: () => _completeScene(sequence),
+                                      ),
                                 ghosts: view.ghosts(onMove: _moveToken),
                                 onBoardTap: () => _explainTap(view.tapExplanation),
                                 homeBurst: _homeBurst,
@@ -316,7 +342,10 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                           LudoSeatRow(
                             left: seatAt(LudoCorner.bottomLeft),
                             right: seatAt(LudoCorner.bottomRight),
-                            onWarningSecond: () => ref.read(gameSoundServiceProvider).play(GameSound.tick, volume: 0.6),
+                            // No ticking while the board is still catching up with the server.
+                            onWarningSecond: timeline.blocking || timeline.isCatchingUp
+                                ? null
+                                : () => ref.read(gameSoundServiceProvider).play(GameSound.tick, volume: 0.6),
                             warnUserId: me,
                           ),
                         ],
@@ -338,7 +367,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                           ),
                         ),
                       ),
-                      if (game.phase == LudoMatchPhase.finished && !animation.busy) ...[
+                      if (game.phase == LudoMatchPhase.finished && !timeline.busy) ...[
                         const SizedBox(height: 8),
                         FilledButton.icon(
                           onPressed: () => context.pushReplacement(GameRoutes.result(GameCodes.ludo, widget.matchId)),

@@ -1,3 +1,4 @@
+import 'package:friends_game_app/features/ludo/domain/ludo_board_spec.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
 
 enum LudoTokenState { base, active, homePath, finished }
@@ -250,15 +251,25 @@ class LudoStartingRollState {
 }
 
 class LudoRuntimeSnapshot {
-  const LudoRuntimeSnapshot({required this.game, required this.startingRoll, required this.resignedPlayerIds});
+  LudoRuntimeSnapshot({
+    required this.game,
+    required this.startingRoll,
+    required this.resignedPlayerIds,
+    LudoBoardSpec? board,
+  }) : board = board ?? LudoBoardSpec.fromRulesVersion(game.rulesVersion);
+
   final LudoGameState game;
   final LudoStartingRollState startingRoll;
   final List<String> resignedPlayerIds;
 
-  factory LudoRuntimeSnapshot.fromJson(Map<String, dynamic> json) => LudoRuntimeSnapshot(
+  /// Progress thresholds for this match (server-sent, else from the rules version).
+  final LudoBoardSpec board;
+
+  factory LudoRuntimeSnapshot.fromJson(Map<String, dynamic> json, {LudoBoardSpec? board}) => LudoRuntimeSnapshot(
         game: LudoGameState.fromJson(Map<String, dynamic>.from(json['game'] as Map)),
         startingRoll: LudoStartingRollState.fromJson(Map<String, dynamic>.from(json['startingRoll'] as Map)),
         resignedPlayerIds: (json['resignedPlayerIds'] as List? ?? const []).map((e) => e.toString()).toList(growable: false),
+        board: board,
       );
 
   LudoRuntimeSnapshot copyWith({LudoGameState? game, LudoStartingRollState? startingRoll, List<String>? resignedPlayerIds}) =>
@@ -266,6 +277,7 @@ class LudoRuntimeSnapshot {
         game: game ?? this.game,
         startingRoll: startingRoll ?? this.startingRoll,
         resignedPlayerIds: resignedPlayerIds ?? this.resignedPlayerIds,
+        board: board,
       );
 }
 
@@ -328,6 +340,7 @@ class LudoMoveResolution {
     required this.tokenBefore,
     required this.tokenAfter,
     required this.capturedTokenIds,
+    this.path = const [],
   });
   final String playerId;
   final int diceValue;
@@ -335,13 +348,28 @@ class LudoMoveResolution {
   final LudoToken tokenAfter;
   final List<String> capturedTokenIds;
 
-  factory LudoMoveResolution.fromJson(Map<String, dynamic> json) => LudoMoveResolution(
-        playerId: json['playerId']?.toString() ?? '',
-        diceValue: int.tryParse(json['diceValue']?.toString() ?? '') ?? 0,
-        tokenBefore: LudoToken.fromJson(Map<String, dynamic>.from(json['tokenBefore'] as Map)),
-        tokenAfter: LudoToken.fromJson(Map<String, dynamic>.from(json['tokenAfter'] as Map)),
-        capturedTokenIds: (json['capturedTokenIds'] as List? ?? const []).map((e) => e.toString()).toList(growable: false),
-      );
+  /// Server-computed squares the token visits (including its start); empty
+  /// from older servers, in which case the client derives it.
+  final List<int> path;
+
+  String get tokenId => tokenAfter.id;
+  bool get captures => capturedTokenIds.isNotEmpty;
+  bool get finishes => tokenAfter.state == LudoTokenState.finished;
+
+  factory LudoMoveResolution.fromJson(Map<String, dynamic> json) {
+    final nested = json['move'];
+    final serverPath = (nested is Map ? nested['path'] : json['path']) as List?;
+    return LudoMoveResolution(
+      playerId: json['playerId']?.toString() ?? '',
+      diceValue: int.tryParse(json['diceValue']?.toString() ?? '') ?? 0,
+      tokenBefore: LudoToken.fromJson(Map<String, dynamic>.from(json['tokenBefore'] as Map)),
+      tokenAfter: LudoToken.fromJson(Map<String, dynamic>.from(json['tokenAfter'] as Map)),
+      capturedTokenIds: (json['capturedTokenIds'] as List? ?? const []).map((e) => e.toString()).toList(growable: false),
+      path: serverPath == null
+          ? const []
+          : serverPath.map((e) => int.tryParse(e.toString())).whereType<int>().toList(growable: false),
+    );
+  }
 }
 
 /// Server-computed landing preview for one legal token (rules stay server-side).

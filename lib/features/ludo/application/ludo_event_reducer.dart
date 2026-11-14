@@ -62,11 +62,7 @@ LudoRuntimeSnapshot reduceLudoEvent(LudoRuntimeSnapshot snapshot, RealtimeEvent 
       final rawMove = data['move'];
       if (rawMove is Map) {
         final resolution = LudoMoveResolution.fromJson(Map<String, dynamic>.from(rawMove));
-        game = game.replaceToken(resolution.tokenAfter);
-        for (final capturedId in resolution.capturedTokenIds) {
-          final captured = game.tokenById(capturedId);
-          if (captured != null) game = game.replaceToken(captured.copyWith(state: LudoTokenState.base, progress: -1));
-        }
+        game = _applyMove(game, resolution, includeCaptures: true);
       }
       game = game.copyWith(clearDiceValue: true, legalTokenIds: const []);
       break;
@@ -103,7 +99,42 @@ LudoRuntimeSnapshot reduceLudoEvent(LudoRuntimeSnapshot snapshot, RealtimeEvent 
   return snapshot.copyWith(game: game, startingRoll: startingRoll, resignedPlayerIds: resigned);
 }
 
-/// A player who is out takes their unfinished tokens back to the yard.
+/// Presented-board step for a walk that just ended: the mover lands. Captured
+/// tokens go home here only when no capture scene follows ([includeCaptures]).
+LudoRuntimeSnapshot applyMoveToPresented(
+  LudoRuntimeSnapshot snapshot,
+  RealtimeEvent event,
+  LudoMoveResolution move, {
+  required bool includeCaptures,
+}) {
+  var game = snapshot.game.copyWith(version: event.version ?? snapshot.game.version);
+  game = _applyMove(game, move, includeCaptures: includeCaptures);
+  game = game.copyWith(clearDiceValue: true, legalTokenIds: const []);
+  return snapshot.copyWith(game: game);
+}
+
+/// Presented-board step for a capture flight that just landed in the yard.
+LudoRuntimeSnapshot applyCapturesToPresented(LudoRuntimeSnapshot snapshot, Iterable<String> capturedTokenIds) {
+  var game = snapshot.game;
+  for (final capturedId in capturedTokenIds) {
+    final captured = game.tokenById(capturedId);
+    if (captured != null) game = game.replaceToken(captured.copyWith(state: LudoTokenState.base, progress: -1));
+  }
+  return snapshot.copyWith(game: game);
+}
+
+LudoGameState _applyMove(LudoGameState game, LudoMoveResolution resolution, {required bool includeCaptures}) {
+  game = game.replaceToken(resolution.tokenAfter);
+  if (!includeCaptures) return game;
+  for (final capturedId in resolution.capturedTokenIds) {
+    final captured = game.tokenById(capturedId);
+    if (captured != null) game = game.replaceToken(captured.copyWith(state: LudoTokenState.base, progress: -1));
+  }
+  return game;
+}
+
+/// A player who is out takes their shared-track tokens back to the yard (the
+/// server lists exactly which ones; home-lane tokens stay where they are).
 LudoGameState _retire(LudoGameState game, Object? tokenIds) {
   for (final id in (tokenIds as List? ?? const []).map((e) => e.toString())) {
     final token = game.tokenById(id);

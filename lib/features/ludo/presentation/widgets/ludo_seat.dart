@@ -32,7 +32,15 @@ class LudoSeatView {
     this.onRoll,
     this.tokensHome = 0,
     this.tokensToWin = 4,
+    this.diceSettleDuration = const Duration(milliseconds: 650),
+    this.onDiceSettled,
   });
+
+  /// Length of the settle tumble (the timeline's dice scene, catch-up applied).
+  final Duration diceSettleDuration;
+
+  /// Reports that the shown roll has landed (completes the dice scene).
+  final VoidCallback? onDiceSettled;
 
   final LudoMatchParticipant participant;
   final LudoCorner corner;
@@ -156,6 +164,8 @@ class LudoSeat extends StatelessWidget {
           accentColor: seat.color,
           size: seat.isMe ? 58 : 44,
           showRollHint: seat.isMe && seat.diceState == LudoDiceVisualState.ready,
+          settleDuration: seat.diceSettleDuration,
+          onSettled: seat.onDiceSettled,
         ),
         if (seat.recentRolls.isNotEmpty && !(seat.isMe && seat.diceState == LudoDiceVisualState.ready)) ...[
           const SizedBox(height: 6),

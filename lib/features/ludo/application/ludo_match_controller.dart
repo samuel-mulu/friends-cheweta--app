@@ -1,12 +1,14 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/core/socket/realtime_event.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/game_hub/data/game_hub_repository.dart';
-import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_event_reducer.dart';
+import 'package:friends_game_app/features/ludo/application/ludo_timeline_controller.dart';
+import 'package:friends_game_app/features/ludo/domain/ludo_board_spec.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 
 class LudoMatchViewState {
@@ -30,6 +32,9 @@ class LudoMatchViewState {
   });
 
   final String? matchId;
+
+  /// Authoritative snapshot: the latest the server told us. Decides what the
+  /// player may do. The board draws the timeline's *presented* snapshot instead.
   final LudoRuntimeSnapshot? snapshot;
   final LudoTimingState? timing;
   final List<LudoMatchParticipant> participants;
@@ -112,7 +117,18 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
 
   @override
   LudoMatchViewState build() {
-    final socket = ref.watch(gameSocketServiceProvider);
+    // Read, don't watch: a rebuilt socket service must never wipe the match
+    // state (the screen would spin forever). Re-bind the streams instead.
+    _bind(ref.read(gameSocketServiceProvider));
+    ref.listen<GameSocketService>(gameSocketServiceProvider, (_, next) => _bind(next));
+    ref.onDispose(() {
+      _eventSub?.cancel();
+      _socketSub?.cancel();
+    });
+    return const LudoMatchViewState();
+  }
+
+  void _bind(GameSocketService socket) {
     _eventSub?.cancel();
     _socketSub?.cancel();
     _eventSub = socket.events.listen(_onEvent);
@@ -121,12 +137,9 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
         unawaited(recover(reason: 'socket_reconnected'));
       }
     });
-    ref.onDispose(() {
-      _eventSub?.cancel();
-      _socketSub?.cancel();
-    });
-    return const LudoMatchViewState();
   }
+
+  LudoTimelineController get _timeline => ref.read(ludoTimelineProvider.notifier);
 
   Future<void> join(String matchId) async {
     if (matchId.isEmpty) return;
@@ -134,7 +147,7 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
     state = LudoMatchViewState(matchId: matchId, loading: true, turnDurationSeconds: state.turnDurationSeconds);
     _openEventVersion = null;
     _seenEventIds.clear();
-    ref.read(ludoAnimationQueueProvider.notifier).clear();
+    _timeline.seed(null);
     try {
       final socket = ref.read(gameSocketServiceProvider);
       await socket.connect();
@@ -168,10 +181,18 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
 
   /// Commands resolve to true when the server accepted them. State itself only
   /// changes from server events; the result lets the UI end optimistic effects.
-  Future<bool> rollForStart() => _command('ludo:roll_for_start');
-  Future<bool> roll() => _command('ludo:roll');
+  Future<bool> rollForStart() => _roll('ludo:roll_for_start');
+  Future<bool> roll() => _roll('ludo:roll');
   Future<bool> resign() => _command('ludo:resign');
   Future<bool> move(String tokenId) => _command('ludo:move', tokenId: tokenId);
+
+  Future<bool> _roll(String eventName) async {
+    final me = ref.read(authControllerProvider).user?.id;
+    if (me != null) _timeline.startOptimisticSpin(me);
+    final ok = await _command(eventName);
+    if (!ok) _timeline.stopOptimisticSpin();
+    return ok;
+  }
 
   Future<bool> _command(String eventName, {String? tokenId}) async {
     final snapshot = state.snapshot;
@@ -205,6 +226,16 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
   static const _recoverOn = {'ACK_TIMEOUT', 'MATCH_VERSION_CONFLICT', 'SEND_FAILED', 'MATCH_ROOM_NOT_JOINED'};
 
   void _onEvent(RealtimeEvent event) {
+    try {
+      _handleEvent(event);
+    } catch (error, stack) {
+      // A payload we cannot read must not kill the stream; the server has the truth.
+      debugPrint('ludo event ${event.name} rejected: $error\n$stack');
+      unawaited(recover(reason: 'parse_error'));
+    }
+  }
+
+  void _handleEvent(RealtimeEvent event) {
     final matchId = state.matchId;
     final snapshot = state.snapshot;
     if (matchId == null || snapshot == null || event.matchId != matchId) return;
@@ -271,52 +302,8 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
               ? const []
               : null,
     );
-    _enqueuePresentation(event);
-  }
-
-  void _enqueuePresentation(RealtimeEvent event) {
-    final queue = ref.read(ludoAnimationQueueProvider.notifier);
-    final data = event.data;
-    switch (event.name) {
-      case 'ludo:starting_roll':
-      case 'ludo:dice_rolled':
-        queue.enqueue(LudoPresentationEvent(
-          kind: LudoPresentationKind.dice,
-          playerId: data['playerId']?.toString(),
-          diceValue: int.tryParse(data['diceValue']?.toString() ?? ''),
-        ));
-        break;
-      case 'ludo:token_moved':
-        final raw = data['move'];
-        if (raw is Map) {
-          final move = LudoMoveResolution.fromJson(Map<String, dynamic>.from(raw));
-          queue.enqueue(LudoPresentationEvent(kind: LudoPresentationKind.move, playerId: move.playerId, tokenId: move.tokenAfter.id, move: move));
-        }
-        break;
-      case 'ludo:token_captured':
-        queue.enqueue(LudoPresentationEvent(
-          kind: LudoPresentationKind.capture,
-          playerId: data['playerId']?.toString(),
-          tokenId: data['tokenId']?.toString(),
-          tokenIds: (data['tokenIds'] as List? ?? const []).map((e) => e.toString()).toList(),
-        ));
-        break;
-      case 'ludo:token_finished':
-        queue.enqueue(LudoPresentationEvent(kind: LudoPresentationKind.finish, playerId: data['playerId']?.toString(), tokenId: data['tokenId']?.toString()));
-        break;
-      case 'match:started':
-        queue.enqueue(LudoPresentationEvent(kind: LudoPresentationKind.matchStarted, playerId: data['playerId']?.toString()));
-        break;
-      case 'ludo:turn_started':
-        queue.enqueue(LudoPresentationEvent(kind: LudoPresentationKind.turn, playerId: data['playerId']?.toString()));
-        break;
-      case 'ludo:extra_roll_granted':
-        queue.enqueue(LudoPresentationEvent(kind: LudoPresentationKind.extraRoll, playerId: data['playerId']?.toString()));
-        break;
-      case 'match:finished':
-        queue.enqueue(const LudoPresentationEvent(kind: LudoPresentationKind.matchFinished));
-        break;
-    }
+    // The board catches up through the timeline, scene by scene.
+    _timeline.enqueue(event);
   }
 
   void _applySnapshotAck(Map<String, dynamic> ack, {required String matchId, bool recovering = false}) {
@@ -330,7 +317,10 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
       state = state.copyWith(loading: false, recovering: false, error: 'The server returned an invalid match snapshot.');
       return;
     }
-    final snapshot = LudoRuntimeSnapshot.fromJson(Map<String, dynamic>.from(rawState));
+    final snapshot = LudoRuntimeSnapshot.fromJson(
+      Map<String, dynamic>.from(rawState),
+      board: LudoBoardSpec.tryParse(ack['board']),
+    );
     final timing = LudoTimingState.fromJson(Map<String, dynamic>.from(rawTiming));
     final participants = _parseParticipants(ack['participants'], snapshot);
     final lastDice = _seedDiceHistory(snapshot);
@@ -347,7 +337,10 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
       legalMoves: LudoMovePreview.listFrom(ack['legalMoves']),
       strikes: timing.consecutiveTimeoutsByPlayer,
       maxStrikes: state.maxStrikes,
+      sessionCode: state.sessionCode,
     );
+    // Whatever was mid-animation is stale now: show the server's board as is.
+    _timeline.seed(snapshot);
   }
 
   Map<String, int> _seedDiceHistory(LudoRuntimeSnapshot snapshot) {

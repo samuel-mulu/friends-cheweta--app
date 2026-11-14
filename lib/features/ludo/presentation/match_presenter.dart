@@ -1,8 +1,11 @@
 import 'package:flutter/painting.dart';
-import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
+import 'package:friends_game_app/features/ludo/application/ludo_scene.dart';
+import 'package:friends_game_app/features/ludo/application/ludo_timeline_controller.dart';
 import 'package:friends_game_app/features/match/application/match_reactions_controller.dart';
+import 'package:friends_game_app/features/ludo/domain/ludo_board_spec.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
+import 'package:friends_game_app/features/ludo/domain/ludo_motion.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_seats.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board_geometry.dart';
@@ -16,38 +19,25 @@ class TurnBannerData {
   final bool mine;
 }
 
-/// Presentation-only values for what a seat shows that the server does not
-/// know about (which faces were already animated, who is spinning, reactions).
-class SeatPresentation {
-  const SeatPresentation({
-    this.presentedDice = const {},
-    this.diceKeys = const {},
-    this.rollHistory = const {},
-    this.reactions = const {},
-    this.mySpin = false,
-  });
-  final Map<String, int> presentedDice;
-  final Map<String, int> diceKeys;
-  final Map<String, List<int>> rollHistory;
-  final Map<String, ShownReaction> reactions;
-  final bool mySpin;
-}
-
 /// Pure mapping from match state to what the match screen shows: seats,
 /// tokens, previews, banner and hints. No widgets, no IO, so it is unit tested
 /// directly and the screen stays a thin layout.
+///
+/// Two snapshots feed it: the controller's *authoritative* one (what the player
+/// may do) and the timeline's *presented* one (what the board shows). Input
+/// opens only when they agree, so a token never glows before its dice landed.
 class MatchPresenter {
   MatchPresenter({
     required this.match,
+    required this.timeline,
     required this.me,
-    required this.animation,
     required this.connected,
     this.pendingTokenId,
   }) : assert(match.snapshot != null, 'present a joined match only');
 
   final LudoMatchViewState match;
+  final LudoTimelineState timeline;
   final String? me;
-  final LudoAnimationState animation;
 
   /// Socket connected (recovery is read from [match]).
   final bool connected;
@@ -55,8 +45,12 @@ class MatchPresenter {
   /// Token I just tapped, until the server answers.
   final String? pendingTokenId;
 
-  LudoRuntimeSnapshot get snapshot => match.snapshot!;
+  LudoRuntimeSnapshot get authoritative => match.snapshot!;
+
+  /// What the board shows right now.
+  LudoRuntimeSnapshot get snapshot => timeline.presented ?? authoritative;
   LudoGameState get game => snapshot.game;
+  LudoBoardSpec get board => snapshot.board;
 
   late final List<LudoMatchParticipant> participants = withColors(match.participants, snapshot);
   late final LudoColor? myColor = participants.where((p) => p.userId == me).firstOrNull?.color;
@@ -67,20 +61,31 @@ class MatchPresenter {
   /// No command in flight and the link is up.
   bool get actionsAllowed => match.pendingCommandId == null && online;
 
-  /// Input is invited only once dice / move animations have played, so a
-  /// token never glows before its dice has landed.
-  bool get canAct => actionsAllowed && !animation.blocking;
+  /// The board has caught up with the server.
+  bool get drained => timeline.idle && game.version >= authoritative.game.version;
 
-  LudoMoveResolution? get walkingMove =>
-      animation.current?.kind == LudoPresentationKind.move ? animation.current?.move : null;
+  /// Input is invited only once the board shows the server's state.
+  bool get canAct => actionsAllowed && !timeline.blocking && !timeline.isCatchingUp && drained;
+
+  LudoMoveScene? get walking => switch (timeline.current) { final LudoMoveScene s => s, _ => null };
+  LudoCaptureScene? get capturing => switch (timeline.current) { final LudoCaptureScene s => s, _ => null };
+  LudoFinishScene? get finishing => switch (timeline.current) { final LudoFinishScene s => s, _ => null };
 
   // ---- seats
 
-  List<LudoSeatView> seats(SeatPresentation extras, {required void Function(bool startRoll) onRoll}) => [
-        for (final participant in participants) _seat(participant, extras, onRoll),
-      ];
+  List<LudoSeatView> seats({
+    required Map<String, ShownReaction> reactions,
+    required void Function(bool startRoll) onRoll,
+    void Function(int sequence)? onDiceSettled,
+  }) =>
+      [for (final participant in participants) _seat(participant, reactions, onRoll, onDiceSettled)];
 
-  LudoSeatView _seat(LudoMatchParticipant participant, SeatPresentation extras, void Function(bool) onRoll) {
+  LudoSeatView _seat(
+    LudoMatchParticipant participant,
+    Map<String, ShownReaction> reactions,
+    void Function(bool) onRoll,
+    void Function(int sequence)? onDiceSettled,
+  ) {
     final userId = participant.userId;
     final isMe = userId == me;
     final preGame = game.phase == LudoMatchPhase.preGame;
@@ -93,7 +98,8 @@ class MatchPresenter {
 
     final canStartRoll = isMe && preGame && game.turnPhase == LudoTurnPhase.startRoll && startCandidate && !startRolled;
     final canRoll = isMe && !preGame && active && game.turnPhase == LudoTurnPhase.waitingForRoll;
-    final rollingNow = animation.current?.kind == LudoPresentationKind.dice && animation.current?.playerId == userId;
+    final diceScene = switch (timeline.current) { final LudoDiceScene s => s, _ => null };
+    final rollingNow = diceScene != null && diceScene.playerId == userId;
 
     final diceState = rollingNow
         ? LudoDiceVisualState.rolling
@@ -115,26 +121,26 @@ class MatchPresenter {
                         : (isMe ? 'Your turn' : 'Rolling…'))
                     : null;
 
-    final reaction = extras.reactions[userId];
+    final reaction = reactions[userId];
+    final sequence = timeline.sequence;
     return LudoSeatView(
       participant: participant,
       corner: orientation.cornerOf(participant.color ?? LudoColor.red),
       isMe: isMe,
       active: active,
-      // Presented face first; after a reconnect fall back to the last known
-      // roll, but never while a roll is queued (that would spoil it).
-      diceValue: extras.presentedDice[userId] ??
-          (animation.busy ? null : match.lastDiceByPlayer[userId]) ??
-          (preGame ? snapshot.startingRoll.rolls[userId] : null),
-      diceKey: extras.diceKeys[userId] ?? 0,
-      spinning: isMe && extras.mySpin,
+      // Only faces the timeline has shown; a queued roll is never spoiled.
+      diceValue: timeline.presentedDice[userId] ?? (preGame ? snapshot.startingRoll.rolls[userId] : null),
+      diceKey: timeline.diceKeys[userId] ?? 0,
+      spinning: isMe && timeline.spinningPlayerId == userId,
       diceState: diceState,
+      diceSettleDuration: timeline.scale(LudoMotion.diceRoll),
+      onDiceSettled: rollingNow && onDiceSettled != null ? () => onDiceSettled(sequence) : null,
       turnEndsAt: active ? match.timing?.turnEndsAt : null,
       turnSeconds: match.turnDurationSeconds,
       status: status,
       rank: rankIndex >= 0 && game.players.length > 2 ? rankIndex + 1 : (rankIndex == 0 ? 1 : null),
       resigned: resigned,
-      recentRolls: extras.rollHistory[userId] ?? const [],
+      recentRolls: timeline.rollHistory[userId] ?? const [],
       strikes: match.strikes[userId] ?? 0,
       reaction: reaction?.reaction.display,
       reactionSeq: reaction?.seq ?? 0,
@@ -159,7 +165,12 @@ class MatchPresenter {
     // Tokens sharing a cell are fanned out (stackIndex of stackCount).
     final groups = <String, List<String>>{};
     for (final item in raw) {
-      final key = LudoBoardGeometry.occupancyKey(color: item.token.color, progress: item.token.progress, tokenId: item.token.id);
+      final key = LudoBoardGeometry.occupancyKey(
+        color: item.token.color,
+        progress: item.token.progress,
+        tokenId: item.token.id,
+        board: board,
+      );
       groups.putIfAbsent(key, () => []).add(item.token.id);
     }
     final stackOf = <String, (int, int)>{
@@ -167,10 +178,11 @@ class MatchPresenter {
         for (var s = 0; s < ids.length; s++) ids[s]: (s, ids.length),
     };
 
-    final capture = animation.current?.kind == LudoPresentationKind.capture ? animation.current : null;
+    final legal = authoritative.game.legalTokenIds;
+    final emphasized = capturing?.capturedTokenIds.toSet() ?? const <String>{};
     return [
       for (final item in raw)
-        _tokenView(item.token, item.baseIndex, stackOf[item.token.id] ?? (0, 1), capture, onMove),
+        _tokenView(item.token, item.baseIndex, stackOf[item.token.id] ?? (0, 1), legal, emphasized, onMove),
     ];
   }
 
@@ -178,19 +190,20 @@ class MatchPresenter {
     LudoToken token,
     int baseIndex,
     (int, int) stack,
-    LudoPresentationEvent? capture,
+    List<String> legal,
+    Set<String> emphasized,
     void Function(String) onMove,
   ) {
-    final selectable = me == token.ownerId && game.legalTokenIds.contains(token.id) && canAct && pendingTokenId == null;
+    final selectable = me == token.ownerId && legal.contains(token.id) && canAct && pendingTokenId == null;
     return LudoBoardTokenView(
       id: token.id,
       color: token.color,
       progress: token.progress,
       baseIndex: baseIndex,
       highlighted: selectable,
-      emphasized: capture?.tokenIds.contains(token.id) ?? false,
+      emphasized: emphasized.contains(token.id),
       pending: pendingTokenId == token.id,
-      finished: token.state == LudoTokenState.finished || token.progress > 56,
+      finished: token.state == LudoTokenState.finished || board.isFinished(token.progress),
       stackIndex: stack.$1,
       stackCount: stack.$2,
       onTap: selectable ? () => onMove(token.id) : null,
@@ -201,9 +214,10 @@ class MatchPresenter {
   List<LudoGhostView> ghosts({required void Function(String tokenId) onMove}) {
     final color = myColor;
     if (color == null || !_myMove) return const [];
+    final legal = authoritative.game.legalTokenIds;
     return [
       for (final preview in match.legalMoves)
-        if (game.legalTokenIds.contains(preview.tokenId))
+        if (legal.contains(preview.tokenId))
           LudoGhostView(
             tokenId: preview.tokenId,
             color: color,
@@ -222,6 +236,8 @@ class MatchPresenter {
     String name(String? id) => (find(id)?.displayLabel() ?? 'Opponent').toUpperCase();
     const gold = Color(0xFFFFC83D);
 
+    if (timeline.isCatchingUp) return const TurnBannerData('CATCHING UP…', gold);
+
     if (game.phase == LudoMatchPhase.finished) {
       final winner = game.winnerOrder.firstOrNull;
       return TurnBannerData(winner == me ? 'YOU WON!' : '${name(winner)} WON', find(winner)?.color?.color ?? gold,
@@ -236,21 +252,37 @@ class MatchPresenter {
       }
       return const TurnBannerData('WHO STARTS?', gold);
     }
+
     final current = game.currentPlayerId;
     final color = find(current)?.color?.color ?? gold;
+    switch (timeline.current) {
+      case LudoNoticeScene(:final kind, :final playerId):
+        final who = playerId == me ? 'YOU' : name(playerId);
+        return TurnBannerData(
+          kind == LudoNoticeKind.thirdSix ? 'THREE SIXES — $who LOSE${playerId == me ? '' : 'S'} THE TURN' : 'NO MOVE FOR $who',
+          find(playerId)?.color?.color ?? gold,
+          mine: playerId == me,
+        );
+      case LudoExtraRollScene(:final playerId):
+        return TurnBannerData(playerId == me ? 'EXTRA ROLL!' : '${name(playerId)} ROLLS AGAIN',
+            find(playerId)?.color?.color ?? gold, mine: playerId == me);
+      default:
+        break;
+    }
     return current == me ? TurnBannerData('YOUR TURN', color, mine: true) : TurnBannerData("${name(current)}'S TURN", color);
   }
 
   /// Standing hint under the board (empty while animations play).
   String get hint {
-    if (animation.blocking || game.currentPlayerId != me || game.phase != LudoMatchPhase.playing) return '';
+    if (timeline.isCatchingUp) return 'Catching up…';
+    if (timeline.blocking || !drained || game.currentPlayerId != me || game.phase != LudoMatchPhase.playing) return '';
     return game.turnPhase == LudoTurnPhase.waitingForMove ? 'Tap a glowing token to move' : 'Tap your dice to roll';
   }
 
   /// Why a tap on the board did nothing; null when nothing needs saying.
   String? get tapExplanation {
     if (!online) return 'Reconnecting…';
-    if (animation.blocking || game.phase == LudoMatchPhase.finished) return null; // the hint returns right after
+    if (timeline.blocking || timeline.isCatchingUp || game.phase == LudoMatchPhase.finished) return null; // the hint returns right after
     if (game.phase == LudoMatchPhase.preGame) return 'Tap your dice to roll';
     if (game.currentPlayerId != me) return 'Wait for your turn';
     if (game.turnPhase == LudoTurnPhase.waitingForRoll) return 'Roll your dice first';

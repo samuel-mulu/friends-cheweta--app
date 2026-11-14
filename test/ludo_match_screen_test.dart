@@ -5,19 +5,27 @@ import 'package:friends_game_app/core/audio/game_sound_service.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/chat/application/match_chat_controller.dart';
-import 'package:friends_game_app/features/ludo/application/ludo_animation_queue.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
+import 'package:friends_game_app/features/ludo/application/ludo_timeline_controller.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_match_models.dart';
 import 'package:friends_game_app/features/ludo/presentation/screens/ludo_match_screen.dart';
+import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_token.dart';
 import 'package:friends_game_app/features/match/presentation/widgets/celebration.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_seat.dart';
 import 'support/fake_socket.dart';
+import 'support/ludo_fixtures.dart';
 
 const _colors = ['RED', 'GREEN', 'YELLOW', 'BLUE'];
 
-LudoRuntimeSnapshot _snapshot(List<String> playerIds, {String turnPhase = 'WAITING_FOR_ROLL', List<String> legal = const []}) =>
+LudoRuntimeSnapshot _snapshot(
+  List<String> playerIds, {
+  String turnPhase = 'WAITING_FOR_ROLL',
+  List<String> legal = const [],
+  Map<String, int> progress = const {},
+}) =>
     LudoRuntimeSnapshot.fromJson({
       'game': {
+        'rulesVersion': 'LUDO_CLASSIC_V3',
         'matchId': 'm1',
         'version': 5,
         'phase': 'PLAYING',
@@ -32,13 +40,12 @@ LudoRuntimeSnapshot _snapshot(List<String> playerIds, {String turnPhase = 'WAITI
               'color': playerIds.length == 2 ? ['RED', 'YELLOW'][i] : _colors[i],
               'tokens': [
                 for (var t = 1; t <= 4; t++)
-                  {
-                    'id': '${playerIds.length == 2 ? ['RED', 'YELLOW'][i] : _colors[i]}-$t',
-                    'ownerId': id,
-                    'color': playerIds.length == 2 ? ['RED', 'YELLOW'][i] : _colors[i],
-                    'state': 'BASE',
-                    'progress': -1,
-                  },
+                  tokenJson(
+                    '${playerIds.length == 2 ? ['RED', 'YELLOW'][i] : _colors[i]}-$t',
+                    id,
+                    playerIds.length == 2 ? ['RED', 'YELLOW'][i] : _colors[i],
+                    progress['${playerIds.length == 2 ? ['RED', 'YELLOW'][i] : _colors[i]}-$t'] ?? -1,
+                  ),
               ],
             },
         ],
@@ -77,7 +84,7 @@ class _QuietChat extends MatchChatController {
   Future<void> load(String matchId) async {}
 }
 
-Future<void> _pump(WidgetTester tester, List<String> players, {LudoMatchController Function()? match}) async {
+Future<ProviderContainer> _pump(WidgetTester tester, List<String> players, {LudoMatchController Function()? match}) async {
   tester.view.physicalSize = const Size(360, 740);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -93,6 +100,7 @@ Future<void> _pump(WidgetTester tester, List<String> players, {LudoMatchControll
     child: const MaterialApp(home: LudoMatchScreen(matchId: 'm1')),
   ));
   await tester.pump();
+  return ProviderScope.containerOf(tester.element(find.byType(LudoMatchScreen)));
 }
 
 void main() {
@@ -141,31 +149,65 @@ void main() {
     expect(seats.firstWhere((s) => !s.seat.isMe).seat.strikes, 2);
   });
 
-  testWidgets('a token reaching home bursts confetti; the result shows a win moment, tap to dismiss', (tester) async {
-    await _pump(tester, ['me', 'p2']);
-    final queue = ProviderScope.containerOf(tester.element(find.byType(LudoMatchScreen)))
-        .read(ludoAnimationQueueProvider.notifier);
+  testWidgets('a walk is drawn hop by hop; the placed token only appears at the end', (tester) async {
+    final snapshot = _snapshot(['me', 'p2'], progress: {'RED-1': 3});
+    final container = await _pump(tester, ['me', 'p2'], match: () => _FixedMatch(snapshot));
+    final timeline = container.read(ludoTimelineProvider.notifier);
+    timeline.seed(snapshot);
+    await tester.pump();
 
-    queue.enqueue(const LudoPresentationEvent(kind: LudoPresentationKind.finish, playerId: 'me', tokenId: 'RED-1'));
+    Offset redOne() => tester.getCenter(find.byWidgetPredicate((w) => w is LudoTokenPiece && w.baseIndex == 0 && w.color.name == 'red').first);
+    final start = redOne();
+
+    timeline.enqueue(moveEvent(playerId: 'me', tokenId: 'RED-1', color: 'RED', from: 3, to: 6, dice: 3, version: 6));
+    await tester.pump(); // walker mounted
+    await tester.pump(const Duration(milliseconds: 1)); // first frame of the walk
+    expect(container.read(ludoTimelineProvider).busy, isTrue);
+    final early = redOne();
+    expect((early - start).distance, lessThan(12), reason: 'the token starts where it stood, it does not jump');
+
+    await tester.pump(const Duration(milliseconds: 300)); // mid-walk (3 hops × 150 ms)
+    final mid = redOne();
+    expect((mid - start).distance, greaterThan(12));
+
+    await tester.pump(const Duration(milliseconds: 400)); // walk completes → scene reported
+    await tester.pump();
+    expect(container.read(ludoTimelineProvider).idle, isTrue);
+    expect(container.read(ludoTimelineProvider).presented!.game.tokenById('RED-1')!.progress, 6);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a token reaching home bursts confetti; the result shows a win moment, tap to dismiss', (tester) async {
+    final snapshot = _snapshot(['me', 'p2'], progress: {'RED-1': 55});
+    final container = await _pump(tester, ['me', 'p2'], match: () => _FixedMatch(snapshot));
+    final timeline = container.read(ludoTimelineProvider.notifier);
+    timeline.seed(snapshot);
+    await tester.pump();
+
+    timeline.enqueue(moveEvent(playerId: 'me', tokenId: 'RED-1', color: 'RED', from: 55, to: 56, dice: 1, version: 6));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400)); // one hop + settle, then the finish scene
     await tester.pump();
     expect(find.byType(Confetti), findsOneWidget);
 
-    queue.enqueue(const LudoPresentationEvent(kind: LudoPresentationKind.matchFinished));
-    await tester.pump(const Duration(milliseconds: 500));
+    timeline.enqueue(ludoEvent('match:finished', {'winnerOrder': ['me', 'p2']}, version: 7));
+    await tester.pump(const Duration(milliseconds: 600)); // finish scene ends, match end starts
+    await tester.pump();
     expect(find.byType(WinCelebration), findsOneWidget);
     await tester.tap(find.byType(WinCelebration));
     await tester.pump();
     expect(find.byType(WinCelebration), findsNothing);
 
-    await tester.pump(const Duration(seconds: 4)); // let the queue and timers finish
+    await tester.pump(const Duration(seconds: 4)); // let the timeline and timers finish
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('the win moment also ends on its own', (tester) async {
-    await _pump(tester, ['me', 'p2']);
-    ProviderScope.containerOf(tester.element(find.byType(LudoMatchScreen)))
-        .read(ludoAnimationQueueProvider.notifier)
-        .enqueue(const LudoPresentationEvent(kind: LudoPresentationKind.matchFinished));
+    final snapshot = _snapshot(['me', 'p2']);
+    final container = await _pump(tester, ['me', 'p2'], match: () => _FixedMatch(snapshot));
+    final timeline = container.read(ludoTimelineProvider.notifier);
+    timeline.seed(snapshot);
+    timeline.enqueue(ludoEvent('match:finished', {'winnerOrder': ['me', 'p2']}, version: 6));
     await tester.pump();
     expect(find.byType(WinCelebration), findsOneWidget);
     await tester.pump(const Duration(seconds: 3));

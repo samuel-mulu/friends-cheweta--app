@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:friends_game_app/features/ludo/domain/ludo_board_spec.dart';
 import 'package:friends_game_app/features/ludo/domain/ludo_visual_models.dart';
 
 class LudoGridCell {
@@ -7,10 +8,15 @@ class LudoGridCell {
   final int column;
 }
 
+/// 15×15 grid geometry. Progress thresholds (where the track ends and the home
+/// column begins) come from the match's [LudoBoardSpec], never from literals.
 abstract final class LudoBoardGeometry {
   static const gridSize = 15;
-  static const safeGlobalSquares = <int>{0, 8, 13, 21, 26, 34, 39, 47};
+  static const safeGlobalSquares = LudoBoardSpec.safeGlobalSquares;
 
+  /// The shared loop, clockwise from RED's start square (6,1). GREEN starts at
+  /// index 13, YELLOW at 26, BLUE at 39. Index 50 is RED's door square (7,0);
+  /// index 51 (6,0) is the cell just before RED's start.
   static const track = <LudoGridCell>[
     LudoGridCell(6, 1), LudoGridCell(6, 2), LudoGridCell(6, 3), LudoGridCell(6, 4), LudoGridCell(6, 5),
     LudoGridCell(5, 6), LudoGridCell(4, 6), LudoGridCell(3, 6), LudoGridCell(2, 6), LudoGridCell(1, 6),
@@ -42,10 +48,16 @@ abstract final class LudoBoardGeometry {
   };
 
   /// Logical cell key for stacking (base tokens use unique keys so yard layout stays clean).
-  static String occupancyKey({required LudoColor color, required int progress, required String tokenId}) {
+  static String occupancyKey({
+    required LudoColor color,
+    required int progress,
+    required String tokenId,
+    LudoBoardSpec board = LudoBoardSpec.standard,
+  }) {
     if (progress < 0) return 'base-$tokenId';
-    if (progress <= 51) return 'track-${(color.startIndex + progress) % 52}';
-    if (progress <= 56) return 'home-${color.name}-$progress';
+    final square = board.globalSquare(color, progress);
+    if (square != null) return 'track-$square';
+    if (board.isHome(progress)) return 'home-${color.name}-$progress';
     return 'finish-${color.name}';
   }
 
@@ -54,6 +66,7 @@ abstract final class LudoBoardGeometry {
     required int progress,
     required int baseIndex,
     required double boardSize,
+    LudoBoardSpec board = LudoBoardSpec.standard,
     int stackIndex = 0,
     int stackCount = 1,
   }) {
@@ -61,16 +74,16 @@ abstract final class LudoBoardGeometry {
     Offset center;
 
     if (progress < 0) {
-      center = _baseCenter(color, baseIndex, cell);
       // Yard uses designated pocket spots — no track stacking.
-      return center;
-    } else if (progress <= 51) {
-      final global = (color.startIndex + progress) % 52;
-      final grid = track[global];
+      return _baseCenter(color, baseIndex, cell);
+    }
+    final square = board.globalSquare(color, progress);
+    if (square != null) {
+      final grid = track[square % track.length];
       center = Offset((grid.column + .5) * cell, (grid.row + .5) * cell);
-    } else if (progress <= 56) {
+    } else if (board.isHome(progress)) {
       final path = homePaths[color]!;
-      final index = (progress - 52).clamp(0, path.length - 1).toInt();
+      final index = (progress - board.homeStart).clamp(0, path.length - 1).toInt();
       final grid = path[index];
       center = Offset((grid.column + .5) * cell, (grid.row + .5) * cell);
     } else {
