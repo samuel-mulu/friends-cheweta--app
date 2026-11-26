@@ -25,22 +25,33 @@ enum GameSound {
   final int voices;
 }
 
+/// Sound effects never take audio focus: they mix with the player's music
+/// instead of pausing it, and one effect never interrupts another.
+final _effectsContext = AudioContextConfig(focus: AudioContextConfigFocus.mixWithOthers).build();
+
 /// Plays short effects with low latency. Sound is a nice-to-have: every
 /// failure is swallowed so audio can never break gameplay.
+///
+/// Each sound has a fixed set of players, created once and reused in turn.
+/// (audioplayers' `AudioPool` must not be used here: in low-latency mode
+/// Android never reports that a sound finished, so the pool never gets a
+/// player back and creates a new one for every play, and each of those keeps
+/// asking the platform for its position on every frame. After a few minutes
+/// of play that flood froze the app.)
 class GameSoundService {
   GameSoundService(this._preferences);
 
   /// Same key as the Profile "Game sounds" switch (PreferencesController.soundKey).
   static const _enabledKey = 'sound_enabled';
   final PreferencesStorage? _preferences;
-  final Map<GameSound, Future<AudioPool?>> _pools = {};
+  final Map<GameSound, Future<_Voices?>> _voices = {};
 
   bool get enabled => _preferences?.getBool(_enabledKey) ?? true;
 
-  /// Warm the pools so the first roll is not delayed by asset loading.
+  /// Load every sound up front so the first roll is not delayed.
   void preload() {
     for (final sound in GameSound.values) {
-      unawaited(_pool(sound));
+      unawaited(_load(sound));
     }
   }
 
@@ -51,20 +62,15 @@ class GameSoundService {
 
   Future<void> _play(GameSound sound, double volume) async {
     try {
-      final pool = await _pool(sound);
-      await pool?.start(volume: volume);
+      await (await _load(sound))?.play(volume);
     } catch (error) {
       debugPrint('sound ${sound.name} failed: $error');
     }
   }
 
-  Future<AudioPool?> _pool(GameSound sound) => _pools.putIfAbsent(sound, () async {
+  Future<_Voices?> _load(GameSound sound) => _voices.putIfAbsent(sound, () async {
         try {
-          return await AudioPool.createFromAsset(
-            path: 'sfx/${sound.file}.wav',
-            maxPlayers: sound.voices,
-            playerMode: PlayerMode.lowLatency,
-          );
+          return await _Voices.load('sfx/${sound.file}.wav', sound.voices);
         } catch (error) {
           debugPrint('sound ${sound.name} unavailable: $error');
           return null;
@@ -72,10 +78,78 @@ class GameSoundService {
       });
 
   Future<void> dispose() async {
-    for (final pool in _pools.values) {
-      await (await pool)?.dispose();
+    final loaded = _voices.values.toList();
+    _voices.clear();
+    for (final voices in loaded) {
+      await (await voices)?.dispose();
     }
-    _pools.clear();
+  }
+}
+
+/// The reusable players of one sound, used round-robin.
+class _Voices {
+  _Voices._(this._players);
+
+  final List<_Voice> _players;
+  int _next = 0;
+
+  static Future<_Voices> load(String asset, int count) async {
+    final players = <_Voice>[];
+    for (var i = 0; i < count; i++) {
+      players.add(await _Voice.load(asset));
+    }
+    return _Voices._(players);
+  }
+
+  Future<void> play(double volume) {
+    final voice = _players[_next];
+    _next = (_next + 1) % _players.length;
+    return voice.play(volume);
+  }
+
+  Future<void> dispose() async {
+    for (final voice in _players) {
+      await voice.dispose();
+    }
+  }
+}
+
+class _Voice {
+  _Voice._(this._player);
+
+  final AudioPlayer _player;
+  double? _volume;
+
+  /// Calls to one player run in order, never interleaved.
+  Future<void> _queue = Future.value();
+
+  static Future<_Voice> load(String asset) async {
+    final player = AudioPlayer()
+      // Nothing here needs the playback position; without this the player
+      // polls it from the platform on every frame while it plays.
+      ..positionUpdater = null;
+    await player.setPlayerMode(PlayerMode.lowLatency);
+    // Keep the loaded sound after stop so it can be replayed instantly.
+    await player.setReleaseMode(ReleaseMode.stop);
+    await player.setAudioContext(_effectsContext);
+    await player.setSource(AssetSource(asset));
+    return _Voice._(player);
+  }
+
+  Future<void> play(double volume) => _queue = _queue.then((_) async {
+        // Low-latency players never report completion, so a finished sound
+        // still counts as playing: stop it first, or resume does nothing.
+        await _player.stop();
+        if (_volume != volume) {
+          await _player.setVolume(volume);
+          _volume = volume;
+        }
+        await _player.resume();
+      }).catchError((Object error) => debugPrint('sound failed: $error'));
+
+  Future<void> dispose() async {
+    await _queue;
+    await _player.dispose();
   }
 }
 

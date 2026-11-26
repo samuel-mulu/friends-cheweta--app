@@ -5,6 +5,12 @@ class Wallet {
   final BigInt lockedBalance;
   final String currency;
 
+  Map<String, dynamic> toJson() => {
+        'availableBalance': availableBalance.toString(),
+        'lockedBalance': lockedBalance.toString(),
+        'currency': currency,
+      };
+
   factory Wallet.fromJson(Map<String, dynamic> json) => Wallet(
         availableBalance: BigInt.parse(json['availableBalance'].toString()),
         lockedBalance: BigInt.parse(json['lockedBalance'].toString()),

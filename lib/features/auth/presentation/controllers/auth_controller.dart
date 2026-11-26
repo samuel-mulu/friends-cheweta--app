@@ -92,10 +92,10 @@ class AuthController extends Notifier<AuthState> {
     }
   }
 
-  Future<bool> register({required String fullName, required String phoneNumber, required String password}) async {
+  Future<bool> register({required String fullName, required String phoneNumber, required String password, required String otp}) async {
     state = state.copyWith(loading: true, clearError: true);
     try {
-      final session = await ref.read(authRepositoryProvider).register(fullName: fullName, phoneNumber: phoneNumber, password: password);
+      final session = await ref.read(authRepositoryProvider).register(fullName: fullName, phoneNumber: phoneNumber, password: password, otp: otp);
       await _storage.saveTokens(accessToken: session.accessToken, refreshToken: session.refreshToken);
       await _signedIn(session.user);
       return true;
@@ -103,6 +103,11 @@ class AuthController extends Notifier<AuthState> {
       state = AuthState(status: AuthStatus.unauthenticated, loading: false, error: failure.message);
       return false;
     }
+  }
+
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    await ref.read(authRepositoryProvider).changePassword(currentPassword, newPassword);
+    await _signOutLocally('Password changed. Sign in with your new password.');
   }
 
   Future<void> logout() async {

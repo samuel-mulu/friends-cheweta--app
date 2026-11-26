@@ -16,14 +16,36 @@ class AuthRepository {
     return AuthSession.fromJson(response.data!);
   }
 
-  Future<AuthSession> register({required String fullName, required String phoneNumber, required String password}) async {
+  Future<AuthSession> register({required String fullName, required String phoneNumber, required String password, required String otp}) async {
     final response = await _api.request<Map<String, dynamic>>('/auth/register', method: 'POST', authenticated: false, data: {
       'fullName': fullName.trim(),
+      'otp': otp.trim(),
       'phoneNumber': phoneNumber.trim(),
       'password': password,
       'deviceName': 'Flutter',
     });
     return AuthSession.fromJson(response.data!);
+  }
+
+  Future<void> requestOtp(String phoneNumber, {required bool reset}) async {
+    await _api.request<Map<String, dynamic>>(
+      reset ? '/auth/request-password-reset-otp' : '/auth/request-register-otp',
+      method: 'POST', authenticated: false, data: {'phoneNumber': phoneNumber.trim()},
+    );
+  }
+
+  Future<void> resetPassword(String phoneNumber, String otp, String newPassword) async {
+    await _api.request<Map<String, dynamic>>(
+      '/auth/reset-password', method: 'POST', authenticated: false,
+      data: {'phoneNumber': phoneNumber.trim(), 'otp': otp.trim(), 'newPassword': newPassword},
+    );
+  }
+
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    await _api.request<Map<String, dynamic>>(
+      '/auth/change-password', method: 'POST',
+      data: {'currentPassword': currentPassword, 'newPassword': newPassword},
+    );
   }
 
   Future<User> me() async {

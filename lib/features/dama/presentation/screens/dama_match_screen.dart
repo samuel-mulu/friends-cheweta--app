@@ -15,6 +15,7 @@ import 'package:friends_game_app/features/dama/presentation/dama_presenter.dart'
 import 'package:friends_game_app/features/dama/presentation/widgets/dama_board.dart';
 import 'package:friends_game_app/features/dama/presentation/widgets/dama_paint.dart';
 import 'package:friends_game_app/features/dama/presentation/widgets/dama_seat.dart';
+import 'package:friends_game_app/features/dama/presentation/widgets/dama_type_picker.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/match/application/match_reactions_controller.dart';
 import 'package:friends_game_app/features/match/presentation/match_sheets.dart';
@@ -226,6 +227,12 @@ class _DamaMatchScreenState extends ConsumerState<DamaMatchScreen> with WidgetsB
                   // Seats, banner and board stay together like a table, centred
                   // in the free space; on small phones the board shrinks.
                   child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    // Which Dama this is (እግረኛ / ታንከኛ); tap for the rules.
+                    GestureDetector(
+                      onTap: () => showDamaRules(context, type: game.type),
+                      child: DamaTypeTag(type: game.type, emphasized: true),
+                    ),
+                    const SizedBox(height: 10),
                     seat(view.opponentId, isMe: false),
                     const SizedBox(height: 12),
                     _Banner(text: view.banner, urgent: view.mustCapture),
@@ -317,7 +324,7 @@ class _DamaMatchScreenState extends ConsumerState<DamaMatchScreen> with WidgetsB
             title: const Text('How to play'),
             onTap: () {
               Navigator.pop(sheet);
-              showDamaRules(context);
+              showDamaRules(context, type: match.game?.type);
             },
           ),
           ListTile(
@@ -351,8 +358,9 @@ class _DamaMatchScreenState extends ConsumerState<DamaMatchScreen> with WidgetsB
   }
 }
 
-/// The rules in plain words (also reachable from the lobby).
-Future<void> showDamaRules(BuildContext context) => showModalBottomSheet<void>(
+/// The rules in plain words. In a match [type] is that match's Dama type;
+/// from the lobby (null) both types are explained.
+Future<void> showDamaRules(BuildContext context, {DamaType? type}) => showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -362,19 +370,34 @@ Future<void> showDamaRules(BuildContext context) => showModalBottomSheet<void>(
         builder: (context, scroll) => ListView(
           controller: scroll,
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-          children: const [
-            Text('How to play Dama', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-            SizedBox(height: 12),
-            _Rule(Icons.grid_on_rounded, 'Dark squares only', '12 pieces each. Light moves first.'),
-            _Rule(Icons.north_east_rounded, 'Men step forward', 'One square diagonally forward onto an empty square.'),
-            _Rule(Icons.bolt_rounded, 'Capture is compulsory',
-                'Jump an enemy piece next to you, forward or backward. Keep jumping while you can.'),
-            _Rule(Icons.format_list_numbered_rounded, 'Take the most',
+          children: [
+            Row(children: [
+              const Expanded(child: Text('How to play Dama', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
+              if (type != null) DamaTypeTag(type: type, emphasized: true, large: true),
+            ]),
+            const SizedBox(height: 12),
+            if (type == null) ...[
+              const _Rule(Icons.call_split_rounded, 'Two types', 'Choose one before you play. Only how men capture differs.'),
+              for (final each in DamaType.values) _Rule(each.icon, '${each.name} · ${each.hint}', each.captureRule),
+              const Divider(height: 24),
+            ],
+            const _Rule(Icons.grid_on_rounded, 'Dark squares only', '12 pieces each. Light moves first.'),
+            const _Rule(Icons.north_east_rounded, 'Men step forward', 'One square diagonally forward onto an empty square.'),
+            _Rule(
+              Icons.bolt_rounded,
+              'Capture is compulsory',
+              switch (type) {
+                DamaType.egregna => 'Jump an enemy piece next to you, forward only. Keep jumping forward while you can.',
+                DamaType.tankegna => 'Jump an enemy piece next to you, forward or backward. Keep jumping while you can.',
+                null => 'Jump an enemy piece next to you (backward too in ${DamaType.tankegna.name}). Keep jumping while you can.',
+              },
+            ),
+            const _Rule(Icons.format_list_numbered_rounded, 'Take the most',
                 'If several captures exist you must take the one with the most pieces.'),
-            _Rule(Icons.workspace_premium_rounded, 'Kings fly',
-                'A man that ends on the far row is crowned. Kings slide any distance and capture from afar.'),
-            _Rule(Icons.emoji_events_outlined, 'Winning', 'Take all enemy pieces, or leave your opponent with no move.'),
-            _Rule(Icons.handshake_outlined, 'Draw', '20 moves each with no capture and no man moving is a draw; stakes are returned.'),
+            const _Rule(Icons.workspace_premium_rounded, 'Kings fly',
+                'A man that ends on the far row is crowned. Kings slide any distance and capture from afar, in every direction.'),
+            const _Rule(Icons.emoji_events_outlined, 'Winning', 'Take all enemy pieces, or leave your opponent with no move.'),
+            const _Rule(Icons.handshake_outlined, 'Draw', '20 moves each with no capture and no man moving is a draw; stakes are returned.'),
           ],
         ),
       ),

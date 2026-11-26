@@ -42,6 +42,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   AppTextField(controller: _phone, label: 'Phone number', keyboardType: TextInputType.phone, prefixIcon: Icons.phone_rounded, validator: Validators.phone),
                   const SizedBox(height: 16),
                   AppTextField(controller: _password, label: 'Password', obscureText: true, prefixIcon: Icons.lock_outline_rounded, validator: Validators.password),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: auth.loading ? null : () => context.push('/forgot-password', extra: _phone.text),
+                      child: const Text('Forgot password?'),
+                    ),
+                  ),
                   if (auth.error != null) ...[
                     const SizedBox(height: 12),
                     Text(auth.error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),

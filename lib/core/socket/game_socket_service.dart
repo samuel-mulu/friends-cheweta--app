@@ -1,12 +1,17 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:friends_game_app/core/config/app_config.dart';
+import 'package:friends_game_app/core/networking/api_client.dart';
 import 'package:friends_game_app/core/socket/realtime_event.dart';
 import 'package:friends_game_app/core/storage/secure_storage.dart';
 
 const _forwardedServerEvents = <String>[
   'session:ready',
+  'wallet:updated',
+  'broadcast:changed',
+  'feedback:changed',
   'session:error',
   'lobby:player_joined',
   'lobby:player_left',
@@ -61,9 +66,16 @@ const _forwardedServerEvents = <String>[
 enum GameSocketStatus { disconnected, connecting, connected, recovering }
 
 class GameSocketService {
-  GameSocketService(this._storage);
+  GameSocketService(this._storage, {Future<String?> Function()? refreshToken}) : _refreshToken = refreshToken;
 
   final SecureStorage _storage;
+
+  /// Gets a new access token (the HTTP client's refresh). The socket's token
+  /// is checked when it connects, so an expired one must be replaced first.
+  final Future<String?> Function()? _refreshToken;
+
+  /// One refresh per rejection: a token the server still refuses ends there.
+  bool _authRetried = false;
   io.Socket? _socket;
   final _events = StreamController<RealtimeEvent>.broadcast();
   final _statuses = StreamController<GameSocketStatus>.broadcast();
@@ -86,7 +98,8 @@ class GameSocketService {
     _connectCompleter = completer;
     _setStatus(_socket == null ? GameSocketStatus.connecting : GameSocketStatus.recovering);
 
-    final token = await _storage.readAccessToken();
+    var token = await _storage.readAccessToken();
+    if (token != null && token.isNotEmpty && _expiresSoon(token)) token = await _refreshed() ?? token;
     if (token == null || token.isEmpty) {
       _setStatus(GameSocketStatus.disconnected);
       _connectCompleter = null;
@@ -121,6 +134,17 @@ class GameSocketService {
     });
     socket.onError((error) {
       if (!isConnected) _setStatus(GameSocketStatus.disconnected);
+    });
+    socket.on('session:ready', (_) => _authRetried = false);
+    // The server refused the token (it expired while we were away): refresh
+    // once and connect again with the new one.
+    socket.on('session:error', (raw) {
+      final code = raw is Map ? raw['code']?.toString() : null;
+      if (code != 'INVALID_ACCESS_TOKEN' || _authRetried || !identical(_socket, socket)) return;
+      _authRetried = true;
+      unawaited(() async {
+        if (await _refreshed() != null) await reconnectWithLatestToken();
+      }());
     });
 
     for (final eventName in _forwardedServerEvents) {
@@ -192,6 +216,29 @@ class GameSocketService {
     );
   }
 
+  Future<String?> _refreshed() async {
+    try {
+      return await _refreshToken?.call();
+    } catch (_) {
+      return null; // offline: try with what we have
+    }
+  }
+
+  /// True when the JWT's `exp` is less than a minute away (or unreadable).
+  static bool _expiresSoon(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return false;
+      final payload = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(parts[1])))) as Map<String, dynamic>;
+      final exp = payload['exp'];
+      if (exp is! num) return false;
+      final expiresAt = DateTime.fromMillisecondsSinceEpoch(exp.toInt() * 1000, isUtc: true);
+      return expiresAt.difference(DateTime.now().toUtc()) < const Duration(minutes: 1);
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> reconnectWithLatestToken() async {
     await _disposeSocket();
     await connect();
@@ -224,7 +271,10 @@ class GameSocketService {
 }
 
 final gameSocketServiceProvider = Provider<GameSocketService>((ref) {
-  final service = GameSocketService(ref.watch(secureStorageProvider));
+  final service = GameSocketService(
+    ref.watch(secureStorageProvider),
+    refreshToken: () => ref.read(apiClientProvider).refreshAccessToken(),
+  );
   ref.onDispose(() {
     unawaited(service.dispose());
   });

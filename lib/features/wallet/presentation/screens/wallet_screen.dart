@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/core/theme/app_spacing.dart';
 import 'package:friends_game_app/core/utils/money_formatter.dart';
 import 'package:friends_game_app/core/widgets/app_error_view.dart';
@@ -23,6 +24,15 @@ class WalletScreen extends ConsumerWidget {
           Text(
             'Your balance and payment actions live in the sidebar.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton(onPressed: () => context.push('/deposit-history'), child: const Text('Deposit history')),
+              OutlinedButton(onPressed: () => context.push('/withdrawal-history'), child: const Text('Withdrawal history')),
+            ],
           ),
           const SizedBox(height: 24),
           Text('Recent activity', style: Theme.of(context).textTheme.titleLarge),

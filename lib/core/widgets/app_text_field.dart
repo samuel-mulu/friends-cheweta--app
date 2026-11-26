@@ -10,6 +10,8 @@ class AppTextField extends StatelessWidget {
     this.keyboardType,
     this.obscureText = false,
     this.prefixIcon,
+    this.readOnly = false,
+    this.onChanged,
   });
 
   final TextEditingController controller;
@@ -19,6 +21,8 @@ class AppTextField extends StatelessWidget {
   final TextInputType? keyboardType;
   final bool obscureText;
   final IconData? prefixIcon;
+  final bool readOnly;
+  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -27,6 +31,8 @@ class AppTextField extends StatelessWidget {
       validator: validator,
       keyboardType: keyboardType,
       obscureText: obscureText,
+      readOnly: readOnly,
+      onChanged: onChanged,
       decoration: InputDecoration(labelText: label, hintText: hint, prefixIcon: prefixIcon == null ? null : Icon(prefixIcon)),
     );
   }

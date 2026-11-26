@@ -74,7 +74,7 @@ void main() {
     ]);
     addTearDown(container.dispose);
     final lobby = container.read(liveLobbyControllerProvider.notifier);
-    await lobby.join(_mode);
+    await lobby.open('LUDO', stakes: const [_mode], stakeId: 'mode-1');
     await lobby.challenge(
       const LobbyPlayer(userId: 'sam', displayName: 'Sam', state: LobbyPlayerState.ready),
       tokensToWin: 3,

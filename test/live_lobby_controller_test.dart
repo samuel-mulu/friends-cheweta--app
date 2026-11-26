@@ -36,7 +36,7 @@ void main() {
 
   test('after leaving, a socket reconnect does not rejoin the lobby (no ghost presence)', () async {
     final lobby = container.read(liveLobbyControllerProvider.notifier);
-    await lobby.join(_mode);
+    await lobby.open('LUDO', stakes: const [_mode], stakeId: 'mode-1');
     await lobby.leave();
     socket.sent.clear();
 
@@ -48,18 +48,18 @@ void main() {
   });
 
   test('while in the lobby, a socket reconnect rejoins it', () async {
-    await container.read(liveLobbyControllerProvider.notifier).join(_mode);
+    await container.read(liveLobbyControllerProvider.notifier).open('LUDO', stakes: const [_mode], stakeId: 'mode-1');
     socket.sent.clear();
 
     socket.statuses$.add(GameSocketStatus.connected);
     await flush();
 
-    expect(socket.sent, ['lobby:join']);
+    expect(socket.sent, ['lobby:join_game']);
   });
 
   test('accept ack alone is enough to enter the match', () async {
     final lobby = container.read(liveLobbyControllerProvider.notifier);
-    await lobby.join(_mode);
+    await lobby.open('LUDO', stakes: const [_mode], stakeId: 'mode-1');
     socket.events$.add(RealtimeEvent(name: 'challenge:received', payload: {
       'data': {'id': 'ch1', 'challengerId': 'other', 'opponentId': 'me', 'status': 'PENDING'},
     }));
@@ -78,7 +78,7 @@ void main() {
 
   test('a cancelled challenge leaves us online until the server restores READY', () async {
     final lobby = container.read(liveLobbyControllerProvider.notifier);
-    await lobby.join(_mode);
+    await lobby.open('LUDO', stakes: const [_mode], stakeId: 'mode-1');
     socket.events$.add(RealtimeEvent(name: 'challenge:cancelled', payload: {
       'data': {'id': 'ch1', 'status': 'CANCELLED'},
     }));
@@ -96,7 +96,7 @@ void main() {
 
   test('invite: creating shows the code; joining returns the match to enter', () async {
     final lobby = container.read(liveLobbyControllerProvider.notifier);
-    await lobby.join(_mode);
+    await lobby.open('LUDO', stakes: const [_mode], stakeId: 'mode-1');
     socket.reply = (event, _) => switch (event) {
           'challenge:invite_create' => {
               'ok': true,
@@ -125,7 +125,7 @@ void main() {
 
   test('rematch events are ignored by the lobby', () async {
     final lobby = container.read(liveLobbyControllerProvider.notifier);
-    await lobby.join(_mode);
+    await lobby.open('LUDO', stakes: const [_mode], stakeId: 'mode-1');
     socket.push('challenge:received', {'id': 'r1', 'kind': 'REMATCH', 'challengerId': 'other', 'opponentId': 'me'});
     await flush();
     expect(container.read(liveLobbyControllerProvider).activeChallenge, isNull);
@@ -133,7 +133,7 @@ void main() {
 
   test('Connect works while I am only online (server readies me in the same step)', () async {
     final lobby = container.read(liveLobbyControllerProvider.notifier);
-    await lobby.join(_mode);
+    await lobby.open('LUDO', stakes: const [_mode], stakeId: 'mode-1');
     expect(container.read(liveLobbyControllerProvider).myState, LobbyPlayerState.online);
     socket.sent.clear();
 

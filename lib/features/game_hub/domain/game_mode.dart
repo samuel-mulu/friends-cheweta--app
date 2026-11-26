@@ -13,6 +13,7 @@ class GameMode {
     required this.rulesVersion,
     required this.enabled,
     this.gameCode = 'LUDO',
+    this.custom = false,
   });
 
   final String id;
@@ -29,6 +30,9 @@ class GameMode {
   /// Backend game code (LUDO, DAMA). Set by the repository from the request.
   final String gameCode;
 
+  /// An amount a player chose in the lobby (not a catalog stake).
+  final bool custom;
+
   GameMode withGameCode(String code) => GameMode(
         id: id,
         gameId: gameId,
@@ -41,6 +45,7 @@ class GameMode {
         rulesVersion: rulesVersion,
         enabled: enabled,
         gameCode: code,
+        custom: custom,
       );
 
   int get totalPotMinor => stakeAmountMinor * playerCount;
@@ -48,6 +53,21 @@ class GameMode {
   int get estimatedFeeMinor => (totalPotMinor * platformFeeBps) ~/ 10000;
 
   int get estimatedWinnerPayoutMinor => totalPotMinor - estimatedFeeMinor;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'gameId': gameId,
+        'code': code,
+        'name': name,
+        'playerCount': playerCount,
+        'stakeAmountMinor': stakeAmountMinor,
+        'platformFeeBps': platformFeeBps,
+        'turnDurationSeconds': turnDurationSeconds,
+        'rulesVersion': rulesVersion,
+        'enabled': enabled,
+        'gameCode': gameCode,
+        'custom': custom,
+      };
 
   factory GameMode.fromJson(Map<String, dynamic> json) {
     return GameMode(
@@ -60,8 +80,9 @@ class GameMode {
       platformFeeBps: _asInt(json['platformFeeBps']),
       turnDurationSeconds: _asInt(json['turnDurationSeconds']),
       rulesVersion: json['rulesVersion']?.toString() ?? '',
-      enabled: json['enabled'] == true,
-      gameCode: gameCodeOfMatch(json) ?? 'LUDO',
+      enabled: json['enabled'] != false,
+      gameCode: gameCodeOfMatch(json) ?? json['gameCode']?.toString() ?? 'LUDO',
+      custom: json['custom'] == true,
     );
   }
 

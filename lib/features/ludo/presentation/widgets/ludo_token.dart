@@ -157,13 +157,14 @@ class _PinPainter extends CustomPainter {
     final h = size.height;
     final wave = math.sin(phase * math.pi * 2);
     final lift = highlighted && !pending ? (0.5 + 0.5 * wave) * h * 0.1 : 0.0;
-    final tip = Offset(w / 2, h * 0.9);
+    final tip = Offset(w / 2, h * 0.84);
+    final base = Rect.fromCenter(center: tip, width: w * 0.82, height: h * 0.38);
 
-    // Cell ring under movable tokens.
+    // Pulsing ring around the base of a movable token.
     if (highlighted || pending) {
       final glow = 0.45 + 0.35 * (0.5 + 0.5 * wave);
       canvas.drawOval(
-        Rect.fromCenter(center: tip, width: w * 0.86, height: h * 0.32),
+        base.inflate(w * 0.09),
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = w * 0.07
@@ -171,18 +172,34 @@ class _PinPainter extends CustomPainter {
       );
     }
 
-    // Ground shadow shrinks as the pin lifts.
+    // The base: a solid disc in the player's colour, white rim, dark edge,
+    // so whose token it is reads at a glance on any cell.
     canvas.drawOval(
-      Rect.fromCenter(center: tip, width: w * (0.5 - lift / h), height: h * 0.14),
+      base.shift(Offset(0, h * 0.03)),
       Paint()
-        ..color = Colors.black.withValues(alpha: 0.28)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, w * 0.05),
+        ..color = Colors.black.withValues(alpha: 0.3)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, w * 0.04),
+    );
+    canvas.drawOval(base, Paint()..color = color.color);
+    canvas.drawOval(
+      base.deflate(w * 0.03),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = w * 0.05
+        ..color = Colors.white,
+    );
+    canvas.drawOval(
+      base,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(1.0, w * 0.035)
+        ..color = _outline,
     );
 
     canvas.save();
     canvas.translate(0, -lift);
-    final headCenter = Offset(w / 2, h * 0.38);
-    final r = w * 0.32;
+    final headCenter = Offset(w / 2, h * 0.34);
+    final r = w * 0.3;
     // Teardrop: head circle blended into a point at the tip.
     final pin = Path()
       ..moveTo(tip.dx, tip.dy - h * 0.02)

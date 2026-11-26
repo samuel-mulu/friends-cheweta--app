@@ -7,6 +7,9 @@ import 'package:friends_game_app/core/theme/app_theme.dart';
 import 'package:friends_game_app/core/theme/theme_controller.dart';
 import 'package:friends_game_app/features/auth/domain/auth_state.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
+import 'package:friends_game_app/features/communications/communications_host.dart';
+import 'package:friends_game_app/features/payments/data/payment_repository.dart';
+import 'package:friends_game_app/features/wallet/presentation/controllers/wallet_controller.dart';
 
 class FriendsGameApp extends ConsumerWidget {
   const FriendsGameApp({super.key});
@@ -22,6 +25,13 @@ class FriendsGameApp extends ConsumerWidget {
       }
     });
 
+    ref.listen(gameSocketStatusProvider, (previous, next) {
+      if (next == GameSocketStatus.connected && previous != next) _refreshPayments(ref);
+    });
+    ref.listen(_walletEventsProvider, (_, next) {
+      if (next.hasValue) _refreshPayments(ref);
+    });
+
     final router = ref.watch(routerProvider);
     final themeMode = ref.watch(themeModeProvider);
     return MaterialApp.router(
@@ -31,6 +41,19 @@ class FriendsGameApp extends ConsumerWidget {
       darkTheme: AppTheme.dark(),
       themeMode: themeMode,
       routerConfig: router,
+      builder: (context, child) => CommunicationsHost(child: child ?? const SizedBox.shrink()),
     );
   }
+
+  void _refreshPayments(WidgetRef ref) {
+    if (ref.read(authControllerProvider).status != AuthStatus.authenticated) return;
+    ref.invalidate(depositConfigProvider);
+    ref.invalidate(activeDepositAttemptsProvider);
+    ref.invalidate(depositHistoryProvider);
+    ref.invalidate(withdrawalHistoryProvider);
+    unawaited(ref.read(walletControllerProvider.notifier).refresh());
+  }
 }
+
+final _walletEventsProvider = StreamProvider.autoDispose((ref) =>
+  ref.watch(gameSocketServiceProvider).events.where((event) => event.name == 'wallet:updated'));

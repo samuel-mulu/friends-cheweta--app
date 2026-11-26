@@ -14,6 +14,10 @@ class ApiClient {
 
   Dio get dio => _dio;
 
+  /// A fresh access token (shared by concurrent callers), or null when the
+  /// session is over. Used by HTTP on a 401 and by the socket before it connects.
+  Future<String?> refreshAccessToken() => _refreshAccessToken();
+
   Future<String?> _refreshAccessToken() {
     final existing = _refreshInFlight;
     if (existing != null) return existing;

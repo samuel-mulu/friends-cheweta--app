@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:friends_game_app/core/errors/app_failure.dart';
+import 'package:friends_game_app/core/storage/json_cache.dart';
 import 'package:friends_game_app/features/game_hub/data/game_hub_repository.dart';
 import 'package:friends_game_app/features/game_hub/domain/game.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
@@ -29,10 +30,26 @@ class GameHubState {
 }
 
 class GameHubController extends Notifier<GameHubState> {
+  static const _cacheKey = 'game_modes';
+
   @override
   GameHubState build() {
     Future.microtask(load);
-    return const GameHubState(loading: true);
+    // Rooms from the last visit show at once; the server's answer replaces them.
+    return GameHubState(modesByGame: _cached(), loading: true);
+  }
+
+  Map<String, List<GameMode>> _cached() {
+    final raw = ref.read(jsonCacheProvider).read(_cacheKey);
+    if (raw is! Map) return const {};
+    return {
+      for (final entry in raw.entries)
+        if (entry.value is List)
+          entry.key.toString(): [
+            for (final item in entry.value as List)
+              if (item is Map) GameMode.fromJson(Map<String, dynamic>.from(item)).withGameCode(entry.key.toString()),
+          ],
+    };
   }
 
   Future<void> load() async {
@@ -54,6 +71,9 @@ class GameHubController extends Notifier<GameHubState> {
           for (final entry in results[2] as List<MapEntry<String, List<GameMode>>>) entry.key: entry.value,
         },
       );
+      await ref.read(jsonCacheProvider).write(_cacheKey, {
+        for (final entry in state.modesByGame.entries) entry.key: [for (final mode in entry.value) mode.toJson()],
+      });
     } on AppFailure catch (failure) {
       state = GameHubState(games: state.games, modesByGame: state.modesByGame, error: failure.message);
     } catch (error) {

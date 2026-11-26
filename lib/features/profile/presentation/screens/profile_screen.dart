@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/core/theme/theme_controller.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/profile/presentation/controllers/preferences_controller.dart';
@@ -72,6 +73,15 @@ class ProfileScreen extends ConsumerWidget {
           ]),
         ),
         const SizedBox(height: 24),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.lock_outline_rounded),
+            title: const Text('Change password'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => context.push('/change-password'),
+          ),
+        ),
+        const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: () => ref.read(authControllerProvider.notifier).logout(),
           icon: const Icon(Icons.logout_rounded),

@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/features/auth/domain/auth_state.dart';
+import 'package:friends_game_app/features/communications/messages_screen.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/auth/presentation/screens/login_screen.dart';
+import 'package:friends_game_app/features/auth/presentation/screens/password_screen.dart';
 import 'package:friends_game_app/features/auth/presentation/screens/register_screen.dart';
 import 'package:friends_game_app/features/auth/presentation/screens/splash_screen.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
@@ -21,9 +23,9 @@ import 'package:friends_game_app/features/chat/presentation/screens/chats_screen
 import 'package:friends_game_app/features/chat/presentation/screens/direct_chat_screen.dart';
 import 'package:friends_game_app/features/ludo/presentation/screens/ludo_match_screen.dart';
 import 'package:friends_game_app/features/match/presentation/screens/match_result_screen.dart';
-import 'package:friends_game_app/features/live_lobby/presentation/screens/live_lobby_screen.dart';
 import 'package:friends_game_app/features/notifications/presentation/screens/notifications_screen.dart';
 import 'package:friends_game_app/features/payments/presentation/screens/deposit_screen.dart';
+import 'package:friends_game_app/features/payments/presentation/screens/payment_history_screen.dart';
 import 'package:friends_game_app/features/payments/presentation/screens/withdrawal_screen.dart';
 import 'package:friends_game_app/features/profile/presentation/screens/profile_screen.dart';
 import 'package:friends_game_app/features/shell/presentation/main_shell.dart';
@@ -50,7 +52,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (auth.status == AuthStatus.initializing || !ref.read(splashIntroDoneProvider)) {
         return location == '/splash' ? null : '/splash';
       }
-      final authRoute = location == '/login' || location == '/register';
+      final authRoute = location == '/login' || location == '/register' || location == '/forgot-password';
       if (auth.status == AuthStatus.unauthenticated) return authRoute ? null : '/login';
       if (auth.status == AuthStatus.authenticated && (authRoute || location == '/splash')) return '/home';
       return null;
@@ -59,6 +61,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/splash', builder: (_, __) => const SplashScreen()),
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
+      GoRoute(path: '/forgot-password', builder: (_, state) => PasswordScreen.reset(initialPhone: state.extra as String?)),
+      GoRoute(path: '/change-password', builder: (_, __) => const PasswordScreen.change()),
       StatefulShellRoute.indexedStack(
         builder: (_, __, shell) => MainShell(navigationShell: shell),
         branches: [
@@ -71,7 +75,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(path: '/deposit', builder: (_, __) => const DepositScreen()),
       GoRoute(path: '/withdraw', builder: (_, __) => const WithdrawalScreen()),
+      GoRoute(path: '/deposit-history', builder: (_, __) => const PaymentHistoryScreen(withdrawal: false)),
+      GoRoute(path: '/withdrawal-history', builder: (_, __) => const PaymentHistoryScreen(withdrawal: true)),
       GoRoute(path: '/games', builder: (_, __) => const GameHubScreen()),
+      GoRoute(path: '/messages', builder: (_, __) => const MessagesScreen()),
       GoRoute(path: '/chats', builder: (_, __) => const ChatsScreen()),
       GoRoute(
         path: '/chats/:userId',
@@ -85,10 +92,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         GoRoute(path: GameRoutes.lobby(code), builder: (_, __) => GameLobbyScreen(gameCode: code)),
         GoRoute(
           path: GameRoutes.matchmaking(code),
+          // Older links to one stake's room: the game lobby, sitting at that stake.
           builder: (_, state) {
             final mode = state.extra;
-            if (mode is GameMode) return LiveLobbyScreen(mode: mode);
-            return Scaffold(body: Center(child: Text('Choose a ${GameRoutes.displayName(code)} room first.')));
+            return GameLobbyScreen(gameCode: code, initialStakeId: mode is GameMode ? mode.id : null);
           },
         ),
       ],

@@ -1,4 +1,4 @@
-/// Ethiopian Dama as sent by the server (rules version DAMA_ET_V1).
+/// Ethiopian Dama as sent by the server (see [DamaType] for the two rule sets).
 ///
 /// The server decides every rule; these types only describe its state. Squares
 /// are 0..63 = `row * 8 + col`, row 0 being Light's back rank. The board is a
@@ -8,6 +8,43 @@ library;
 import 'package:friends_game_app/features/match/domain/turn_timing.dart';
 
 export 'package:friends_game_app/features/match/domain/turn_timing.dart';
+
+/// The two kinds of Dama a stake can be. Only how men capture differs; kings
+/// fly and capture in every direction in both.
+enum DamaType {
+  /// Men capture forward only.
+  egregna('DAMA_ET_FORWARD_V1', 'እግረኛ', 'ወደፊት ብቻ ይበላል', 'Men capture forward only.'),
+
+  /// Men capture forward and backward (the classic rules).
+  tankegna('DAMA_ET_V1', 'ታንከኛ', 'ወደፊት እና ወደኋላ ይበላል', 'Men capture forward and backward.');
+
+  const DamaType(this.rulesVersion, this.name, this.hint, this.captureRule);
+
+  /// Server rules version of stakes of this type.
+  final String rulesVersion;
+
+  /// Amharic name players know the game by.
+  final String name;
+
+  /// Short Amharic description, shown under the name.
+  final String hint;
+
+  /// How men capture, in plain English (rules sheet).
+  final String captureRule;
+
+  /// The classic rules: what every older stake and match is.
+  static const fallback = DamaType.tankegna;
+
+  /// Null for a rules version that is not a Dama type.
+  static DamaType? tryParse(String? rulesVersion) {
+    for (final type in values) {
+      if (type.rulesVersion == rulesVersion) return type;
+    }
+    return null;
+  }
+
+  static DamaType parse(String? rulesVersion) => tryParse(rulesVersion) ?? fallback;
+}
 
 enum DamaColor {
   light,
@@ -92,7 +129,11 @@ class DamaGame {
     this.winnerOrder = const [],
     this.result,
     this.finishReason,
+    this.type = DamaType.fallback,
   });
+
+  /// እግረኛ or ታንከኛ (from the match's rules version).
+  final DamaType type;
 
   final String matchId;
   final int version;
@@ -159,6 +200,7 @@ class DamaGame {
       winnerOrder: (json['winnerOrder'] as List? ?? const []).map((e) => e.toString()).toList(),
       result: _optional(json['result']),
       finishReason: _optional(json['finishReason']),
+      type: DamaType.parse(_optional(json['rulesVersion'])),
     );
   }
 
@@ -188,6 +230,7 @@ class DamaGame {
         winnerOrder: winnerOrder ?? this.winnerOrder,
         result: result ?? this.result,
         finishReason: finishReason ?? this.finishReason,
+        type: type,
       );
 }
 
