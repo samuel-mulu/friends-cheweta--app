@@ -5,13 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
 import 'package:friends_game_app/core/theme/app_colors.dart';
+import 'package:friends_game_app/core/theme/app_motion.dart';
+import 'package:friends_game_app/core/theme/app_type.dart';
 import 'package:friends_game_app/core/utils/money_formatter.dart';
 import 'package:friends_game_app/core/widgets/app_error_view.dart';
+import 'package:friends_game_app/core/widgets/token_hop_loader.dart';
 import 'package:friends_game_app/core/widgets/ui.dart';
 import 'package:friends_game_app/features/chat/presentation/widgets/chat_thread.dart';
-import 'package:friends_game_app/features/dama/domain/dama_models.dart';
 import 'package:friends_game_app/features/dama/presentation/screens/dama_match_screen.dart';
-import 'package:friends_game_app/features/dama/presentation/widgets/dama_type_picker.dart';
+import 'package:friends_game_app/features/game_hub/domain/game_variant.dart';
+import 'package:friends_game_app/features/game_hub/presentation/widgets/variant_picker.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/game_hub/presentation/controllers/game_hub_controller.dart';
@@ -19,18 +22,17 @@ import 'package:friends_game_app/features/game_hub/presentation/widgets/game_gri
 import 'package:friends_game_app/features/karta/presentation/screens/karta_match_screen.dart';
 import 'package:friends_game_app/features/live_lobby/domain/lobby_player.dart';
 import 'package:friends_game_app/features/live_lobby/presentation/controllers/live_lobby_controller.dart';
-import 'package:friends_game_app/features/ludo/presentation/widgets/goal_picker.dart';
 import 'package:friends_game_app/features/match/application/practice_launcher.dart';
 import 'package:friends_game_app/features/profile/presentation/controllers/preferences_controller.dart';
 import 'package:friends_game_app/features/wallet/presentation/controllers/wallet_controller.dart';
 import 'package:friends_game_app/features/wallet/presentation/widgets/balance_pill.dart';
 
-/// Dama lobbies offer a type (እግረኛ / ታንከኛ) once the catalog has stakes of both.
-bool _damaTyped(LiveLobbyState state) =>
-    state.gameCode == GameCodes.dama && state.offersAll(DamaType.values.map((type) => type.rulesVersion));
+/// A lobby offers a type picker and type badges once two or more of its game's
+/// types have stakes (Dama እግረኛ / ታንከኛ; Ludo መመለስ ያለበት / የሌለበት / የረሳ ይሸነፋል).
+bool _typed(LiveLobbyState state) => state.offeredVariants.length > 1;
 
-/// The Dama type of a stake, in a lobby that offers types (null otherwise).
-DamaType? _typeOf(LiveLobbyState state, GameMode? stake) => _damaTyped(state) ? DamaType.tryParse(stake?.rulesVersion) : null;
+/// The type of a stake, in a lobby that offers types (null otherwise).
+GameVariant? _typeOf(LiveLobbyState state, GameMode? stake) => _typed(state) ? GameVariants.find(stake?.rulesVersion) : null;
 
 /// One game's live lobby: practice, every stake's players (filterable), chat,
 /// and the player's own stake + Ready in the thumb zone.
@@ -64,17 +66,17 @@ class _GameLobbyScreenState extends ConsumerState<GameLobbyScreen> {
     final stakes = ref.read(gameHubControllerProvider).modesFor(widget.gameCode);
     if (stakes.isEmpty) return;
     _opened = true;
-    unawaited(_lobby.open(widget.gameCode, stakes: stakes, stakeId: widget.initialStakeId ?? _lastDamaTypeStake(stakes)));
+    unawaited(_lobby.open(widget.gameCode, stakes: stakes, stakeId: widget.initialStakeId ?? _lastVariantStake(stakes)));
   }
 
-  /// Dama opens on the type played last (ታንከኛ the first time): its smallest stake.
-  String? _lastDamaTypeStake(List<GameMode> stakes) {
-    if (widget.gameCode != GameCodes.dama) return null;
+  /// A game with types opens on the type played last (its classic type the
+  /// first time): that type's smallest stake. Null: the server's default.
+  String? _lastVariantStake(List<GameMode> stakes) {
     final catalog = stakes.where((stake) => !stake.custom).toList();
-    final both = DamaType.values.every((type) => catalog.any((stake) => stake.rulesVersion == type.rulesVersion));
-    if (!both) return null;
-    final type = ref.read(playerPreferencesProvider).damaType;
-    final ofType = catalog.where((stake) => stake.rulesVersion == type.rulesVersion).toList()
+    final offered = GameVariants.of(widget.gameCode).where((v) => catalog.any((s) => s.rulesVersion == v.rulesVersion));
+    if (offered.length < 2) return null;
+    final variant = ref.read(playerPreferencesProvider).variantFor(widget.gameCode);
+    final ofType = catalog.where((stake) => stake.rulesVersion == variant?.rulesVersion).toList()
       ..sort((a, b) => a.stakeAmountMinor.compareTo(b.stakeAmountMinor));
     return ofType.isEmpty ? null : ofType.first.id;
   }
@@ -112,7 +114,7 @@ class _GameLobbyScreenState extends ConsumerState<GameLobbyScreen> {
       if (next == previous) return;
       final lobby = ref.read(liveLobbyControllerProvider);
       final type = _typeOf(lobby, lobby.myStake);
-      if (type != null) unawaited(ref.read(playerPreferencesProvider.notifier).setDamaType(type));
+      if (type != null) unawaited(ref.read(playerPreferencesProvider.notifier).setVariant(type));
     });
     ref.listen(liveLobbyControllerProvider, (previous, next) {
       final matchId = next.acceptedMatchId;
@@ -144,23 +146,38 @@ class _GameLobbyScreenState extends ConsumerState<GameLobbyScreen> {
                 : null;
     final showTabs = hasStakes && lobbyError == null;
 
+    // Back goes one step: to the screen below, or Home when the lobby was
+    // opened on its own (after a match); never out of the app from here.
+    final hasScreenBelow = context.canPop();
     return PopScope(
-      canPop: !state.isChallenged && !state.isReady,
+      canPop: !state.isChallenged && !state.isReady && hasScreenBelow,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
         if (state.isChallenged) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Answer the request first.')));
           return;
         }
-        if (await _confirmLeaveReady(context) == true && context.mounted) {
+        if (state.isReady) {
+          if (await _confirmLeaveReady(context) != true || !context.mounted) return;
           await _lobby.leave();
-          if (context.mounted) context.pop();
+          if (!context.mounted) return;
+        }
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go('/home');
         }
       },
       child: Scaffold(
         appBar: AppBar(
           title: Text(entry.name),
           actions: [
+            if (practiceGameCodes.contains(widget.gameCode))
+              IconButton(
+                tooltip: 'Practice with a bot (free)',
+                onPressed: () => showPracticeSheet(context, ref, gameCode: widget.gameCode),
+                icon: const Icon(Icons.smart_toy_outlined),
+              ),
             const BalancePill(),
             PopupMenuButton<String>(
               tooltip: 'More',
@@ -173,8 +190,7 @@ class _GameLobbyScreenState extends ConsumerState<GameLobbyScreen> {
               itemBuilder: (_) => [
                 const PopupMenuItem(value: 'code', child: _MenuRow(Icons.key_rounded, 'Join with a code')),
                 const PopupMenuItem(value: 'invite', child: _MenuRow(Icons.person_add_alt_1_rounded, 'Invite a friend')),
-                if (widget.gameCode != GameCodes.ludo)
-                  const PopupMenuItem(value: 'rules', child: _MenuRow(Icons.menu_book_rounded, 'How to play')),
+                if (widget.gameCode != GameCodes.ludo) const PopupMenuItem(value: 'rules', child: _MenuRow(Icons.menu_book_rounded, 'How to play')),
               ],
             ),
             const SizedBox(width: 4),
@@ -191,7 +207,7 @@ class _GameLobbyScreenState extends ConsumerState<GameLobbyScreen> {
                 unread: state.chatUnread,
                 onChanged: (chat) {
                   setState(() => _chat = chat);
-                  if (chat) _lobby.clearChatUnread();
+                  _lobby.setChatOpen(chat);
                 },
               ),
             ),
@@ -227,25 +243,30 @@ class _GameLobbyScreenState extends ConsumerState<GameLobbyScreen> {
             ),
           ),
         ]),
-        bottomNavigationBar: showTabs ? _ReadyBar(state: state, onPickStake: () => _pickStake(context)) : null,
+        // The thumb zone: type, stake and the one gold action.
+        bottomNavigationBar: showTabs ? _Composer(state: state, onOtherAmount: () => _pickCustomStake(context)) : null,
       ),
     );
   }
 
-  /// Dama explains both types once both are offered (else every stake is ታንከኛ).
-  Future<void> _rules(BuildContext context) => widget.gameCode == GameCodes.karta
-      ? showKartaRules(context)
-      : showDamaRules(context, type: _damaTyped(ref.read(liveLobbyControllerProvider)) ? null : DamaType.fallback);
+  /// Dama explains both types once both are offered (else every stake is ታንከኛ);
+  /// Ludo lists its types.
+  Future<void> _rules(BuildContext context) => switch (widget.gameCode) {
+        GameCodes.karta => showKartaRules(context),
+        GameCodes.ludo => showGameTypes(context, GameCodes.ludo),
+        _ => showDamaRules(context, variant: _typed(ref.read(liveLobbyControllerProvider)) ? null : GameVariants.damaClassic),
+      };
 
+  /// An invite plays my stake and (Ludo) the goal chosen in the ready panel.
   Future<void> _invite(BuildContext context) async {
     final state = ref.read(liveLobbyControllerProvider);
     if (state.activeChallenge != null) return;
     if (widget.gameCode != GameCodes.ludo) return _lobby.createInvite();
-    final goal = await pickGoal(context, confirmLabel: 'Create invite');
-    if (goal != null) await _lobby.createInvite(tokensToWin: goal);
+    await _lobby.createInvite(tokensToWin: ref.read(playerPreferencesProvider).tokensToWin);
   }
 
-  /// Ask a ready player to play, at their stake.
+  /// Ask a ready player to play, on their terms: their stake (so their type)
+  /// and, in Ludo, their goal. Confirm first when that differs from mine.
   Future<void> _play(BuildContext context, LobbyPlayer player) async {
     final state = ref.read(liveLobbyControllerProvider);
     final theirs = state.stakeById(player.gameModeId);
@@ -259,28 +280,22 @@ class _GameLobbyScreenState extends ConsumerState<GameLobbyScreen> {
         ));
       return;
     }
-    if (theirs != null && theirs.id != state.myStakeId) {
+    final myGoal = ref.read(playerPreferencesProvider).tokensToWin;
+    final theirGoal = widget.gameCode == GameCodes.ludo ? player.tokensToWin : null;
+    final goalDiffers = theirGoal != null && theirGoal != myGoal;
+    if (theirs != null && (theirs.id != state.myStakeId || goalDiffers)) {
       final ok = await _confirmStakeChange(
         context,
         player,
         theirs,
         theirType: _typeOf(state, theirs),
         myType: _typeOf(state, state.myStake),
+        theirGoal: goalDiffers ? theirGoal : null,
       );
       if (ok != true || !context.mounted) return;
     }
     HapticFeedback.selectionClick();
-    if (widget.gameCode != GameCodes.ludo) return _lobby.challenge(player);
-    final goal = await pickGoal(context, confirmLabel: 'Send request');
-    if (goal != null) await _lobby.challenge(player, tokensToWin: goal);
-  }
-
-  Future<void> _pickStake(BuildContext context) async {
-    final state = ref.read(liveLobbyControllerProvider);
-    if (state.isChallenged) return;
-    final picked = await showAppSheet<String>(context, builder: (_) => _StakeSheet(state: state));
-    if (picked == _customStake && context.mounted) return _pickCustomStake(context);
-    if (picked != null) await _lobby.changeStake(picked);
+    await _lobby.challenge(player, tokensToWin: theirGoal);
   }
 
   /// Any amount: the stake appears in the lobby for everyone while I sit at it.
@@ -290,7 +305,7 @@ class _GameLobbyScreenState extends ConsumerState<GameLobbyScreen> {
     if (amount == null) return;
     // In a typed Dama lobby the custom stake is of the type I play.
     final state = ref.read(liveLobbyControllerProvider);
-    await _lobby.playCustomStake(amount, rulesVersion: _damaTyped(state) ? state.myRules : null);
+    await _lobby.playCustomStake(amount, rulesVersion: _typed(state) ? state.myRules : null);
   }
 
   Future<void> _showInvite(BuildContext context) async {
@@ -312,15 +327,15 @@ class _ConnectionStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final palette = AppPalette.of(context);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-      color: scheme.secondaryContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: palette.surfaceAlt,
       child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-        SizedBox.square(dimension: 12, child: CircularProgressIndicator(strokeWidth: 2, color: scheme.onSecondaryContainer)),
+        const SizedBox.square(dimension: 12, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.gold)),
         const SizedBox(width: 10),
-        Text('Reconnecting…', style: TextStyle(color: scheme.onSecondaryContainer, fontWeight: FontWeight.w600, fontSize: 13)),
+        Text('Reconnecting…', style: AppType.ui(size: 13.5, weight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
       ]),
     );
   }
@@ -337,8 +352,9 @@ class _Tabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = AppPalette.of(context);
-    Widget tab(String label, bool selected, VoidCallback onTap, {required int count, required String status}) {
-      final scheme = Theme.of(context).colorScheme;
+    final scheme = Theme.of(context).colorScheme;
+    // Ready players count in green (live); unread chat is a red badge.
+    Widget tab(String label, bool selected, VoidCallback onTap, {required int count, required String status, required bool live}) {
       return Expanded(
         child: Semantics(
           selected: selected,
@@ -350,15 +366,14 @@ class _Tabs extends StatelessWidget {
             behavior: HitTestBehavior.opaque,
             onTap: onTap,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              constraints: const BoxConstraints(minHeight: 44),
+              duration: AppMotion.state,
+              curve: AppMotion.curve,
+              constraints: const BoxConstraints(minHeight: 42),
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: selected ? scheme.surface : Colors.transparent,
+                color: selected ? palette.surfaceAlt : Colors.transparent,
                 borderRadius: BorderRadius.circular(10),
-                boxShadow:
-                    selected ? [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 6, offset: const Offset(0, 1))] : null,
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Flexible(
@@ -366,16 +381,23 @@ class _Tabs extends StatelessWidget {
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontWeight: FontWeight.w600, color: selected ? scheme.onSurface : scheme.onSurfaceVariant),
+                    style: AppType.ui(size: 15, weight: FontWeight.w600, color: selected ? scheme.onSurface : scheme.onSurfaceVariant),
                   ),
                 ),
                 if (count > 0) ...[
                   const SizedBox(width: 6),
                   Container(
+                    constraints: const BoxConstraints(minWidth: 20),
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                    decoration: BoxDecoration(color: scheme.primary, borderRadius: BorderRadius.circular(999)),
-                    child: Text(count > 99 ? '99+' : '$count',
-                        style: TextStyle(color: scheme.onPrimary, fontSize: 11, fontWeight: FontWeight.w700)),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: live ? palette.liveTint : AppColors.danger,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      count > 99 ? '99+' : '$count',
+                      style: AppType.ui(size: 12, weight: FontWeight.w700, color: live ? palette.live : Colors.white),
+                    ),
                   ),
                 ],
               ]),
@@ -387,10 +409,14 @@ class _Tabs extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(color: palette.surfaceAlt, borderRadius: BorderRadius.circular(13)),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: palette.border),
+      ),
       child: Row(children: [
-        tab('Players', !chat, () => onChanged(false), count: players, status: 'ready'),
-        tab('Chat', chat, () => onChanged(true), count: unread, status: 'unread'),
+        tab('Players', !chat, () => onChanged(false), count: players, status: 'ready', live: true),
+        tab('Chat', chat, () => onChanged(true), count: unread, status: 'unread', live: false),
       ]),
     );
   }
@@ -425,11 +451,6 @@ class _PlayersPane extends StatelessWidget {
     return RefreshIndicator(
       onRefresh: onRefresh,
       child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
-        if (practiceGameCodes.contains(gameCode))
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-            sliver: SliverToBoxAdapter(child: _PracticeRow(gameCode: gameCode)),
-          ),
         if (state.visibleStakes.isNotEmpty && loadError == null) SliverToBoxAdapter(child: _StakeFilter(state: state)),
         if (loadError != null)
           SliverToBoxAdapter(child: AppErrorView(message: loadError!, onRetry: onRefresh))
@@ -464,9 +485,7 @@ class _PlayersPane extends StatelessWidget {
                     ? 'No one is ready yet'
                     : 'No one is ready at ${_typeOf(state, filtered) == null ? '' : '${_typeOf(state, filtered)!.name} · '}'
                         '${MoneyFormatter.compactEtb(filtered.stakeAmountMinor)}',
-                message: state.isReady
-                    ? "You're ready. Players who join will see you at the top."
-                    : 'Tap "I\'m ready" below so others can play you.',
+                message: state.isReady ? "You're ready. Players who join will see you at the top." : 'Tap "I\'m ready" below so others can play you.',
               ),
             )
           else
@@ -485,8 +504,13 @@ class _PlayersPane extends StatelessWidget {
             ),
           if (others.isNotEmpty) ...[
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              sliver: SliverToBoxAdapter(child: SectionHeader(title: 'In the lobby · ${others.length}')),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              sliver: SliverToBoxAdapter(
+                child: SectionHeader(
+                  title: 'In the lobby',
+                  trailing: StatusPill(label: '${others.length}', tone: StatusTone.muted),
+                ),
+              ),
             ),
             SliverList.builder(
               itemCount: others.length,
@@ -509,41 +533,6 @@ class _PlayersPane extends StatelessWidget {
   }
 }
 
-class _PracticeRow extends ConsumerWidget {
-  const _PracticeRow({required this.gameCode});
-  final String gameCode;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => showPracticeSheet(context, ref, gameCode: gameCode),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-          child: Row(children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(color: theme.colorScheme.primaryContainer, borderRadius: BorderRadius.circular(12)),
-              child: Icon(Icons.smart_toy_rounded, color: theme.colorScheme.onPrimaryContainer, size: 22),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Practice with a bot', style: theme.textTheme.titleSmall),
-                Text('Free. Warm up before you play for money.', style: theme.textTheme.bodySmall),
-              ]),
-            ),
-            const Icon(Icons.chevron_right_rounded),
-          ]),
-        ),
-      ),
-    );
-  }
-}
-
 /// "All" plus one chip per stake, with how many are ready at each.
 class _StakeFilter extends ConsumerWidget {
   const _StakeFilter({required this.state});
@@ -552,29 +541,42 @@ class _StakeFilter extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(liveLobbyControllerProvider.notifier);
-    Widget chip(String label, int ready, bool selected, VoidCallback onTap) {
+    // A filter is a view, not a choice of money: the selected chip is ink, not gold.
+    Widget chip(String label, int ready, bool selected, VoidCallback onTap, {bool amount = true}) {
       final scheme = Theme.of(context).colorScheme;
+      final palette = AppPalette.of(context);
+      final fg = selected ? scheme.surface : scheme.onSurface;
       return Padding(
         padding: const EdgeInsets.only(right: 8),
-        child: ChoiceChip(
+        child: Semantics(
+          button: true,
           selected: selected,
-          onSelected: (_) {
-            HapticFeedback.selectionClick();
-            onTap();
-          },
-          label: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text(label),
-            if (ready > 0) ...[
-              const SizedBox(width: 6),
-              LiveDot(size: 6, color: selected ? scheme.onPrimary : null),
-              const SizedBox(width: 3),
-              Text('$ready'),
-            ],
-          ]),
-          labelStyle: TextStyle(
-            color: selected ? scheme.onPrimary : scheme.onSurface,
-            fontWeight: FontWeight.w600,
-            fontFeatures: const [FontFeature.tabularFigures()],
+          label: ready > 0 ? '$label, $ready ready' : label,
+          excludeSemantics: true,
+          child: Material(
+            color: selected ? scheme.onSurface : Colors.transparent,
+            shape: StadiumBorder(side: BorderSide(color: selected ? scheme.onSurface : palette.border)),
+            child: InkWell(
+              customBorder: const StadiumBorder(),
+              onTap: () {
+                HapticFeedback.selectionClick();
+                onTap();
+              },
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 36),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                alignment: Alignment.center,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text(label, style: amount ? AppType.money(size: 16, color: fg) : AppType.ui(size: 14, weight: FontWeight.w600, color: fg)),
+                  if (ready > 0) ...[
+                    const SizedBox(width: 6),
+                    LiveDot(size: 6, color: palette.live),
+                    const SizedBox(width: 3),
+                    Text('$ready', style: AppType.ui(size: 13, weight: FontWeight.w700, color: fg)),
+                  ],
+                ]),
+              ),
+            ),
           ),
         ),
       );
@@ -584,11 +586,11 @@ class _StakeFilter extends ConsumerWidget {
       label: 'Filter players by stake',
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
         child: Row(children: [
           // "All" shows everyone (both Dama types); the amounts are those of my type.
-          chip('All stakes', state.readyCount, state.filterStakeId == null, () => controller.setFilter(null)),
-          for (final stake in _damaTyped(state) && state.myRules != null ? state.stakesOfRules(state.myRules!) : state.visibleStakes)
+          chip('All stakes', state.readyCount, state.filterStakeId == null, () => controller.setFilter(null), amount: false),
+          for (final stake in _typed(state) && state.myRules != null ? state.stakesOfRules(state.myRules!) : state.visibleStakes)
             chip(
               MoneyFormatter.compactEtb(stake.stakeAmountMinor),
               state.readyCountAt(stake.id),
@@ -616,9 +618,9 @@ class _PlayerRow extends StatelessWidget {
   final LobbyPlayer player;
   final GameMode? stake;
 
-  /// Dama type of the player's stake (typed Dama lobbies only), and mine.
-  final DamaType? type;
-  final DamaType? myType;
+  /// Type of the player's stake (lobbies offering types only), and mine.
+  final GameVariant? type;
+  final GameVariant? myType;
   final bool showStake;
   final bool connecting;
   final bool canPlay;
@@ -627,6 +629,7 @@ class _PlayerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final palette = AppPalette.of(context);
     final status = switch (player.state) {
       LobbyPlayerState.ready => _waited(player.readyAt),
       LobbyPlayerState.challenged => 'In a request',
@@ -635,21 +638,32 @@ class _PlayerRow extends StatelessWidget {
     final messageButton = IconButton(
       tooltip: 'Message ${player.displayName}',
       onPressed: () => context.push('/chats/${player.userId}', extra: player.displayName),
-      icon: const Icon(Icons.chat_bubble_outline_rounded, size: 20),
+      icon: Icon(Icons.chat_bubble_outline_rounded, size: 20, color: theme.colorScheme.onSurfaceVariant),
     );
+    // Outlined gold: the screen's one filled gold button is "I'm ready".
     final playButton = player.isReady
-        ? FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size(76, 40), padding: const EdgeInsets.symmetric(horizontal: 16)),
+        ? OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(72, 40),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              foregroundColor: theme.colorScheme.primary,
+              side: BorderSide(color: canPlay ? AppColors.gold : palette.border, width: 1.5),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              textStyle: AppType.ui(size: 15, weight: FontWeight.w700),
+            ),
             onPressed: canPlay && !connecting ? onPlay : null,
-            child: connecting ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Play'),
+            child:
+                connecting ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.gold)) : const Text('Play'),
           )
         : null;
     return Semantics(
       label: '${player.displayName}, ${player.isReady ? 'ready' : status}'
           '${type == null ? '' : ', ${type!.name}'}'
           '${stake == null ? '' : ', ${MoneyFormatter.compactEtb(stake!.stakeAmountMinor)}'}',
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(border: Border(bottom: BorderSide(color: palette.surfaceAlt))),
         child: LayoutBuilder(builder: (context, constraints) {
           final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
           return Row(children: [
@@ -657,12 +671,15 @@ class _PlayerRow extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(player.displayName, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleSmall),
-                const SizedBox(height: 3),
-                Wrap(spacing: 8, runSpacing: 3, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                Text(player.displayName, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
                   // Another type than mine stands out: playing them switches my type.
-                  if (type != null) DamaTypeTag(type: type!, emphasized: myType != null && type != myType),
-                  if (showStake && stake != null) StakePill(amountMinor: stake!.stakeAmountMinor),
+                  if (type != null) VariantTag(variant: type!, emphasized: myType != null && type != myType),
+                  // Ludo: the goal they play (first to N home).
+                  if (player.tokensToWin != null) GoalCrowns(goal: player.tokensToWin!),
+                  if (showStake && stake != null)
+                    Text(MoneyFormatter.compactEtb(stake!.stakeAmountMinor), style: AppType.money(size: 16, color: palette.money)),
                   Text(status, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
                 ]),
               ]),
@@ -689,100 +706,60 @@ class _PlayerRow extends StatelessWidget {
   }
 }
 
-/// The player's own stake and Ready, in the thumb zone.
-class _ReadyBar extends ConsumerWidget {
-  const _ReadyBar({required this.state, required this.onPickStake});
+/// The thumb zone.
+///
+/// Not ready: choose the game type (when the game has several), the Ludo
+/// goal, the stake and auto-match, then one gold "I'm ready". Ready: the
+/// panel folds into a short waiting bar showing what I asked for, so the
+/// players list gets the room; Edit stops waiting and opens the choices again
+/// (change anything, then get ready again).
+class _Composer extends ConsumerStatefulWidget {
+  const _Composer({required this.state, required this.onOtherAmount});
   final LiveLobbyState state;
-  final VoidCallback onPickStake;
+  final VoidCallback onOtherAmount;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_Composer> createState() => _ComposerState();
+}
+
+class _ComposerState extends ConsumerState<_Composer> {
+  /// Folded by the arrow: one line (choices: what I picked and "I'm ready";
+  /// waiting: just that I'm waiting) so the list gets the room.
+  bool _folded = false;
+
+  static bool _waiting(LiveLobbyState state) => state.isReady || state.isChallenged;
+
+  @override
+  void didUpdateWidget(covariant _Composer old) {
+    super.didUpdateWidget(old);
+    // Getting ready or tapping Edit opens the panel fresh.
+    if (_waiting(old.state) != _waiting(widget.state)) _folded = false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final palette = AppPalette.of(context);
-    final controller = ref.read(liveLobbyControllerProvider.notifier);
-    final stake = state.myStake;
-    final balance = ref.watch(walletControllerProvider.select((s) => s.wallet?.availableBalance));
-    final affordable = stake == null || balance == null || balance >= BigInt.from(stake.stakeAmountMinor);
-    final locked = state.busy || state.isRecovering || state.isChallenged;
-    final typed = _damaTyped(state);
-
-    final Widget action;
-    if (!affordable) {
-      action = FilledButton.icon(
-        onPressed: () => context.push('/deposit'),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Add funds'),
-      );
-    } else if (state.isReady) {
-      action = OutlinedButton.icon(
-        onPressed: locked ? null : controller.unready,
-        style: OutlinedButton.styleFrom(side: BorderSide(color: palette.live, width: 1.5), foregroundColor: palette.live),
-        icon: LiveDot(color: palette.live),
-        label: const Text("You're ready · Stop"),
-      );
-    } else {
-      action = FilledButton(
-        onPressed: locked || stake == null
-            ? null
-            : () {
-                HapticFeedback.mediumImpact();
-                controller.ready();
-              },
-        child:
-            state.busy ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2.4)) : const Text("I'm ready"),
-      );
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        border: Border(top: BorderSide(color: palette.border)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            // Dama: choose the game type first, in the thumb zone with the stake.
-            if (typed) ...[
-              DamaTypePicker(
-                compact: true,
-                selected: DamaType.tryParse(state.myRules),
-                readyCounts: {for (final type in DamaType.values) type: state.readyCountOfRules(type.rulesVersion)},
-                enabled: !locked,
-                onChanged: (type) => controller.switchRules(type.rulesVersion),
-              ),
-              const SizedBox(height: 10),
-            ],
-            Row(children: [
-              Semantics(
-                button: true,
-                label: 'Your stake ${stake == null ? '' : MoneyFormatter.compactEtb(stake.stakeAmountMinor)}. Change stake',
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: state.isChallenged ? null : onPickStake,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                      Text('Your stake', style: theme.textTheme.labelSmall),
-                      Row(mainAxisSize: MainAxisSize.min, children: [
-                        Text(
-                          stake == null ? '—' : MoneyFormatter.compactEtb(stake.stakeAmountMinor),
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: palette.money,
-                            fontWeight: FontWeight.w700,
-                            fontFeatures: const [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                        Icon(Icons.expand_more_rounded, color: theme.colorScheme.onSurfaceVariant),
-                      ]),
-                    ]),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(child: action),
-            ]),
+    final state = widget.state;
+    final waiting = _waiting(state);
+    return AnimatedSize(
+      duration: AppMotion.sheet,
+      curve: AppMotion.curve,
+      alignment: Alignment.bottomCenter,
+      child: Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border(top: BorderSide(color: waiting ? palette.live.withValues(alpha: 0.5) : palette.border)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _FoldArrow(folded: _folded, onTap: () => setState(() => _folded = !_folded)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: waiting ? _WaitingBar(state: state, folded: _folded) : _ReadyChoices(state: state, onOtherAmount: widget.onOtherAmount, folded: _folded),
+            ),
           ]),
         ),
       ),
@@ -790,80 +767,381 @@ class _ReadyBar extends ConsumerWidget {
   }
 }
 
-/// Choose the stake to play for.
-class _StakeSheet extends ConsumerWidget {
-  const _StakeSheet({required this.state});
+/// The small arrow on top of the lobby panel: hide or show it.
+class _FoldArrow extends StatelessWidget {
+  const _FoldArrow({required this.folded, required this.onTap});
+  final bool folded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.onSurfaceVariant;
+    return Center(
+      child: Semantics(
+        button: true,
+        label: folded ? 'Show the panel' : 'Hide the panel',
+        excludeSemantics: true,
+        onTap: onTap,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: SizedBox(
+            width: 64,
+            height: 28,
+            child: AnimatedRotation(
+              turns: folded ? 0.5 : 0,
+              duration: AppMotion.state,
+              curve: AppMotion.curve,
+              child: Icon(Icons.keyboard_arrow_down_rounded, size: 24, color: color),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Everything to choose before getting ready, and the gold "I'm ready".
+class _ReadyChoices extends ConsumerWidget {
+  const _ReadyChoices({required this.state, required this.onOtherAmount, this.folded = false});
   final LiveLobbyState state;
+  final VoidCallback onOtherAmount;
+
+  /// One line: what I picked, and the gold action.
+  final bool folded;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final palette = AppPalette.of(context);
+    final controller = ref.read(liveLobbyControllerProvider.notifier);
+    final prefs = ref.watch(playerPreferencesProvider);
+    final preferences = ref.read(playerPreferencesProvider.notifier);
+    final isLudo = state.gameCode == GameCodes.ludo;
+    final stake = state.myStake;
     final balance = ref.watch(walletControllerProvider.select((s) => s.wallet?.availableBalance));
-    // A typed Dama lobby lists the stakes of the type I play (switch type in the bar).
-    final type = _typeOf(state, state.myStake);
-    final stakes = type == null ? state.visibleStakes : state.stakesOfRules(type.rulesVersion);
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Row(children: [
-        Expanded(child: Text('Choose your stake', style: theme.textTheme.titleLarge)),
-        if (type != null) DamaTypeTag(type: type, emphasized: true, large: true),
-      ]),
-      const SizedBox(height: 4),
-      Text('Both players put in the stake. The winner takes the prize.', style: theme.textTheme.bodySmall),
-      const SizedBox(height: 12),
-      OutlinedButton.icon(
-        onPressed: () => Navigator.pop(context, _customStake),
-        icon: const Icon(Icons.edit_rounded, size: 18),
-        label: const Text('Custom stake'),
+    bool canCover(GameMode mode) => balance == null || balance >= BigInt.from(mode.stakeAmountMinor);
+    final affordable = stake == null || canCover(stake);
+    final locked = state.busy || state.isRecovering;
+    final typed = _typed(state);
+
+    // Catalog stakes of my type, plus the custom amount I sit at.
+    final stakes = [
+      for (final mode in typed && state.myRules != null ? state.stakesOfRules(state.myRules!) : state.visibleStakes)
+        if (!mode.custom || mode.id == state.myStakeId) mode,
+    ];
+
+    // Full width in the panel; sized to its label on the folded line.
+    final ButtonStyle? actionStyle =
+        folded ? FilledButton.styleFrom(minimumSize: const Size(0, 48), padding: const EdgeInsets.symmetric(horizontal: 18)) : null;
+    final Widget action = !affordable
+        ? FilledButton.icon(
+            style: actionStyle,
+            onPressed: () => context.push('/deposit'),
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Add funds'),
+          )
+        : FilledButton(
+            style: actionStyle,
+            onPressed: locked || stake == null
+                ? null
+                : () {
+                    HapticFeedback.mediumImpact();
+                    controller.ready(tokensToWin: isLudo ? prefs.tokensToWin : null, autoMatch: prefs.autoMatch);
+                  },
+            child: state.busy
+                ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2.4, color: AppColors.onGold))
+                : Text.rich(TextSpan(children: [
+                    const TextSpan(text: "I'm ready"),
+                    if (stake != null) TextSpan(text: '  ${MoneyFormatter.compactEtb(stake.stakeAmountMinor)}', style: AppType.money(size: 18)),
+                  ])),
+          );
+
+    if (folded) {
+      final variant = typed ? GameVariants.find(state.myRules) : null;
+      return Row(children: [
+        Expanded(
+          child: Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            if (variant != null) VariantTag(variant: variant),
+            if (isLudo) GoalCrowns(goal: prefs.tokensToWin),
+            if (prefs.autoMatch) Icon(Icons.bolt_rounded, size: 16, color: theme.colorScheme.primary, semanticLabel: 'Auto-match on'),
+          ]),
+        ),
+        const SizedBox(width: 10),
+        action,
+      ]);
+    }
+
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (typed) ...[
+        VariantPicker(
+          compact: true,
+          variants: state.offeredVariants,
+          selected: GameVariants.find(state.myRules),
+          readyCounts: {for (final variant in state.offeredVariants) variant: state.readyCountOfRules(variant.rulesVersion)},
+          enabled: !locked,
+          onChanged: (variant) => controller.switchRules(variant.rulesVersion),
+        ),
+        const SizedBox(height: 10),
+      ],
+      if (isLudo) ...[
+        GoalChips(selected: prefs.tokensToWin, enabled: !locked, onChanged: preferences.setTokensToWin),
+        const SizedBox(height: 10),
+      ],
+      _StakeGrid(
+        stakes: stakes,
+        selectedId: state.myStakeId,
+        enabled: !locked,
+        canCover: canCover,
+        readyAt: state.readyCountAt,
+        onPick: controller.changeStake,
+        onOther: onOtherAmount,
       ),
-      const SizedBox(height: 16),
-      for (final stake in stakes) ...[
-        Builder(builder: (context) {
-          final selected = stake.id == state.myStakeId;
-          final affordable = balance == null || balance >= BigInt.from(stake.stakeAmountMinor);
-          final ready = state.readyCountAt(stake.id);
-          return Material(
-            color: selected ? theme.colorScheme.primaryContainer : palette.surfaceAlt,
-            borderRadius: BorderRadius.circular(16),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: affordable ? () => Navigator.pop(context, stake.id) : null,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(children: [
-                  Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(
-                        MoneyFormatter.compactEtb(stake.stakeAmountMinor),
-                        style: theme.textTheme.titleMedium?.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        affordable
-                            ? 'Winner gets ${MoneyFormatter.compactEtb(stake.estimatedWinnerPayoutMinor)} · ${stake.turnDurationSeconds}s turns'
-                            : 'Add funds to play this stake',
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ]),
-                  ),
-                  if (ready > 0) ...[StatusPill(label: '$ready ready', tone: StatusTone.live, dot: true), const SizedBox(width: 8)],
-                  Icon(
-                    selected ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
-                    color: selected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
-                  ),
+      const SizedBox(height: 6),
+      _AutoMatchSwitch(value: prefs.autoMatch, enabled: !locked, onChanged: preferences.setAutoMatch),
+      const SizedBox(height: 6),
+      action,
+      if (stake != null) ...[
+        const SizedBox(height: 8),
+        DefaultTextStyle.merge(
+          style: theme.textTheme.bodySmall,
+          child: Row(children: [
+            Expanded(
+              child: Text.rich(
+                TextSpan(children: [
+                  const TextSpan(text: 'Winner gets '),
+                  TextSpan(text: MoneyFormatter.compactEtb(stake.estimatedWinnerPayoutMinor), style: AppType.money(size: 15, color: palette.money)),
                 ]),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-          );
-        }),
-        const SizedBox(height: 10),
+            Text('${stake.turnDurationSeconds}s per move'),
+          ]),
+        ),
       ],
     ]);
   }
 }
 
-/// Picked in [_StakeSheet] to type an amount instead.
-const _customStake = '__custom__';
+/// "Auto-match": start with the next player ready at the same terms.
+class _AutoMatchSwitch extends StatelessWidget {
+  const _AutoMatchSwitch({required this.value, required this.enabled, required this.onChanged});
+  final bool value;
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return MergeSemantics(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: enabled ? () => onChanged(!value) : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(children: [
+            Icon(Icons.bolt_rounded, size: 20, color: value ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Auto-match', style: theme.textTheme.titleSmall),
+                Text('Start with the next player ready at the same terms', maxLines: 2, style: theme.textTheme.bodySmall),
+              ]),
+            ),
+            Switch(value: value, onChanged: enabled ? onChanged : null),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Ready: what I asked for, that I'm waiting (a match starts by itself with
+/// auto-match), and Edit.
+class _WaitingBar extends ConsumerWidget {
+  const _WaitingBar({required this.state, this.folded = false});
+  final LiveLobbyState state;
+
+  /// Just the status line (no terms, no Edit).
+  final bool folded;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final palette = AppPalette.of(context);
+    final controller = ref.read(liveLobbyControllerProvider.notifier);
+    final me = state.selfPlayer;
+    final stake = state.myStake;
+    // What the server holds for me (my row), else what I chose on this device.
+    final prefs = ref.watch(playerPreferencesProvider);
+    final bool autoMatch = me?.autoMatch ?? prefs.autoMatch;
+    final int? goal = state.gameCode == GameCodes.ludo ? (me?.tokensToWin ?? prefs.tokensToWin) : null;
+    final variant = _typeOf(state, stake);
+    final title = state.isChallenged
+        ? 'A request is open…'
+        : autoMatch
+            ? 'Looking for a player…'
+            : 'Waiting for someone to play you';
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: "You're ready. $title",
+      child: Row(children: [
+        const TokenHopLoader(cell: 10),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleSmall?.copyWith(color: palette.live)),
+            if (!folded) const SizedBox(height: 4),
+            if (!folded)
+              Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                if (variant != null) VariantTag(variant: variant),
+                if (goal != null) GoalCrowns(goal: goal),
+                if (stake != null) Text(MoneyFormatter.compactEtb(stake.stakeAmountMinor), style: AppType.money(size: 16, color: palette.money)),
+                if (autoMatch) Icon(Icons.bolt_rounded, size: 16, color: theme.colorScheme.primary, semanticLabel: 'Auto-match on'),
+              ]),
+          ]),
+        ),
+        if (!folded) const SizedBox(width: 10),
+        if (!folded)
+          OutlinedButton.icon(
+            onPressed: state.busy || state.isChallenged ? null : controller.unready,
+            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44), padding: const EdgeInsets.symmetric(horizontal: 14)),
+            icon: const Icon(Icons.edit_outlined, size: 18),
+            label: const Text('Edit'),
+          ),
+      ]),
+    );
+  }
+}
+
+/// Stakes as chips in a grid, then "Other amount". The chosen one is gold.
+class _StakeGrid extends StatelessWidget {
+  const _StakeGrid({
+    required this.stakes,
+    required this.selectedId,
+    required this.enabled,
+    required this.canCover,
+    required this.readyAt,
+    required this.onPick,
+    required this.onOther,
+  });
+
+  final List<GameMode> stakes;
+  final String? selectedId;
+  final bool enabled;
+  final bool Function(GameMode stake) canCover;
+  final int Function(String stakeId) readyAt;
+  final ValueChanged<String> onPick;
+  final VoidCallback onOther;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    return LayoutBuilder(builder: (context, constraints) {
+      const gap = 8.0;
+      final textScale = MediaQuery.textScalerOf(context).scale(16) / 16;
+      final columns = (constraints.maxWidth / (68 * textScale)).floor().clamp(3, 6);
+      final cell = (constraints.maxWidth - gap * (columns - 1)) / columns;
+      final otherSpan = columns >= 4 ? 2 : columns;
+      return Wrap(spacing: gap, runSpacing: gap, children: [
+        for (final stake in stakes)
+          Builder(builder: (context) {
+            final selected = stake.id == selectedId;
+            final covered = canCover(stake);
+            final ready = readyAt(stake.id);
+            final amount = _chipAmount(stake.stakeAmountMinor);
+            return SizedBox(
+              width: cell,
+              child: Semantics(
+                button: true,
+                selected: selected,
+                enabled: enabled && covered,
+                label: '${MoneyFormatter.compactEtb(stake.stakeAmountMinor)}${ready > 0 ? ', $ready ready' : ''}'
+                    '${covered ? '' : ', add funds to play'}',
+                excludeSemantics: true,
+                child: Material(
+                  color: selected ? palette.selected : palette.surfaceAlt,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: selected ? AppColors.gold : palette.border, width: selected ? 1.5 : 1),
+                  ),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: enabled && covered && !selected
+                        ? () {
+                            HapticFeedback.selectionClick();
+                            onPick(stake.id);
+                          }
+                        : null,
+                    child: Container(
+                      constraints: const BoxConstraints(minHeight: 46),
+                      alignment: Alignment.center,
+                      child: Stack(clipBehavior: Clip.none, children: [
+                        Text(
+                          amount,
+                          maxLines: 1,
+                          style: AppType.money(
+                            size: 19,
+                            color: selected
+                                ? scheme.primary
+                                : covered
+                                    ? scheme.onSurface
+                                    : scheme.onSurfaceVariant.withValues(alpha: 0.6),
+                          ),
+                        ),
+                        if (ready > 0) Positioned(right: -9, top: -2, child: LiveDot(size: 6, color: palette.live)),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        SizedBox(
+          width: cell * otherSpan + gap * (otherSpan - 1),
+          child: Material(
+            color: Colors.transparent,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: palette.border)),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: enabled ? onOther : null,
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 46),
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.edit_outlined, size: 16, color: scheme.onSurfaceVariant),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      'Other amount',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppType.ui(size: 14.5, weight: FontWeight.w600, color: scheme.onSurface),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ]);
+    });
+  }
+
+  /// 50, 100, 1K, 2.5K, 10K: whole birr, short on a chip (ETB is implied).
+  static String _chipAmount(int amountMinor) {
+    final etb = amountMinor / 100;
+    if (etb >= 1000) {
+      final k = etb / 1000;
+      return '${k == k.roundToDouble() ? k.toStringAsFixed(0) : k.toStringAsFixed(1)}K';
+    }
+    return etb == etb.roundToDouble() ? etb.toStringAsFixed(0) : etb.toStringAsFixed(2);
+  }
+}
 
 const _customMinEtb = 5;
 const _customMaxEtb = 10000;
@@ -1026,7 +1304,7 @@ class _InviteSheet extends ConsumerWidget {
       if (stake != null) ...[
         const SizedBox(height: 12),
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          if (_typeOf(state, stake) case final type?) ...[DamaTypeTag(type: type, emphasized: true), const SizedBox(width: 8)],
+          if (_typeOf(state, stake) case final type?) ...[VariantTag(variant: type, emphasized: true), const SizedBox(width: 8)],
           StakePill(amountMinor: stake.stakeAmountMinor, prefix: 'Stake'),
           const SizedBox(width: 8),
           StakePill(amountMinor: stake.estimatedWinnerPayoutMinor, prefix: 'Prize'),
@@ -1051,40 +1329,55 @@ class _InviteSheet extends ConsumerWidget {
   }
 }
 
-/// Playing someone at another stake (and, in Dama, maybe another type) moves me there.
+/// Playing someone on their terms when they differ from mine: their stake
+/// (and type) and, in Ludo, their goal ([theirGoal] when it differs).
 Future<bool?> _confirmStakeChange(
   BuildContext context,
   LobbyPlayer player,
   GameMode stake, {
-  DamaType? theirType,
-  DamaType? myType,
+  GameVariant? theirType,
+  GameVariant? myType,
+  int? theirGoal,
 }) {
   final theme = Theme.of(context);
   // The type I switch to, when it differs from mine.
-  final DamaType? newType = theirType != null && theirType != myType ? theirType : null;
+  final GameVariant? newType = theirType != null && theirType != myType ? theirType : null;
+  final what = [
+    if (newType != null) 'game type',
+    'stake',
+    if (theirGoal != null) 'goal',
+  ];
   return showAppSheet<bool>(
     context,
     builder: (context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Text(
-        'Play ${player.displayName}${newType != null ? ' · ${newType.name}' : ''} for ${MoneyFormatter.compactEtb(stake.stakeAmountMinor)}?',
+        'Play ${player.displayName} for ${MoneyFormatter.compactEtb(stake.stakeAmountMinor)}?',
         style: theme.textTheme.titleLarge,
       ),
       const SizedBox(height: 6),
       Text(
         newType != null
-            ? '${player.displayName} plays ${newType.name}: ${newType.captureRule.toLowerCase()} '
-                'Your game type and stake change to match.'
-            : '${player.displayName} is ready at a different stake. Your stake changes to match.',
+            ? '${player.displayName} plays ${newType.name}: ${newType.rule.toLowerCase()} '
+                'You play on their terms (${what.join(', ')}).'
+            : 'You play on ${player.displayName}\'s terms (${what.join(', ')}).',
         style: theme.textTheme.bodySmall,
       ),
       const SizedBox(height: 16),
+      if (theirGoal != null) ...[
+        Row(children: [
+          GoalCrowns(goal: theirGoal, size: 16),
+          const SizedBox(width: 8),
+          Text(GoalChips.label(theirGoal), style: theme.textTheme.titleSmall),
+        ]),
+        const SizedBox(height: 10),
+      ],
       if (newType != null) ...[
         Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
           if (myType != null) ...[
-            DamaTypeTag(type: myType, large: true),
+            VariantTag(variant: myType, large: true),
             Icon(Icons.arrow_forward_rounded, size: 18, color: theme.colorScheme.onSurfaceVariant),
           ],
-          DamaTypeTag(type: newType, emphasized: true, large: true),
+          VariantTag(variant: newType, emphasized: true, large: true),
         ]),
         const SizedBox(height: 10),
       ],

@@ -14,6 +14,7 @@ import 'package:friends_game_app/features/karta/domain/karta_models.dart';
 import 'package:friends_game_app/features/karta/presentation/widgets/karta_cards.dart';
 import 'package:friends_game_app/features/match/application/match_reactions_controller.dart';
 import 'package:friends_game_app/features/match/presentation/match_sheets.dart';
+import 'package:friends_game_app/features/match/presentation/widgets/match_back_guard.dart';
 import 'package:friends_game_app/features/match/presentation/widgets/celebration.dart';
 import 'package:friends_game_app/features/match/presentation/widgets/match_chrome.dart';
 import 'package:friends_game_app/features/profile/presentation/controllers/preferences_controller.dart';
@@ -126,7 +127,19 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => MatchBackGuard(onBack: _onSystemBack, child: _screen(context));
+
+  /// Phone back: ask before leaving a live match; a finished one opens its result.
+  void _onSystemBack() {
+    final game = ref.read(kartaMatchControllerProvider).game;
+    if (game == null) {
+      context.go(GameRoutes.lobby(GameCodes.karta));
+      return;
+    }
+    _exit(game);
+  }
+
+  Widget _screen(BuildContext context) {
     ref.listen(kartaMatchControllerProvider, _onChange);
     final match = ref.watch(kartaMatchControllerProvider);
     final me = ref.watch(authControllerProvider.select((auth) => auth.user?.id));
@@ -178,11 +191,8 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
       child: Scaffold(
         backgroundColor: KartaPalette.feltBottom,
         body: Stack(fit: StackFit.expand, children: [
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: RadialGradient(center: Alignment(0, -0.1), radius: 1.1, colors: [KartaPalette.feltTop, KartaPalette.feltBottom]),
-            ),
-          ),
+          // Flat felt: the cards carry the art.
+          const ColoredBox(color: KartaPalette.feltBottom),
           SafeArea(
             child: Column(children: [
               MatchConnectionBanner(status: socket, recovering: match.recovering),
@@ -279,9 +289,9 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
       context.pushReplacement(GameRoutes.result(GameCodes.karta, widget.matchId));
       return;
     }
-    if (!await confirmLeaveMatch(context) || !mounted) return;
+    if (!await confirmLeaveMatch(context, widget.matchId) || !mounted) return;
     final ok = await ref.read(kartaMatchControllerProvider.notifier).resign();
-    if (ok && mounted) context.go('/home');
+    if (ok && mounted) context.go(GameRoutes.lobby(GameCodes.karta));
   }
 
   Future<void> _openMenu(KartaGame game) => showModalBottomSheet<void>(
@@ -321,7 +331,7 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
                 title: Text('Resign', style: TextStyle(color: Theme.of(context).colorScheme.error)),
                 onTap: () async {
                   Navigator.pop(sheet);
-                  if (await confirmLeaveMatch(context)) await ref.read(kartaMatchControllerProvider.notifier).resign();
+                  if (await confirmLeaveMatch(context, widget.matchId)) await ref.read(kartaMatchControllerProvider.notifier).resign();
                 },
               ),
           ]),

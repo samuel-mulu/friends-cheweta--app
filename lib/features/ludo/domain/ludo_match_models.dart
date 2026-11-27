@@ -255,12 +255,20 @@ class LudoRuntimeSnapshot {
     required this.game,
     required this.startingRoll,
     required this.resignedPlayerIds,
+    this.missedCapturePlayerIds = const [],
     LudoBoardSpec? board,
   }) : board = board ?? LudoBoardSpec.fromRulesVersion(game.rulesVersion);
 
   final LudoGameState game;
   final LudoStartingRollState startingRoll;
   final List<String> resignedPlayerIds;
+
+  /// Of [resignedPlayerIds], those out for skipping a possible capture
+  /// ("forget to send back and you lose").
+  final List<String> missedCapturePlayerIds;
+
+  /// Under "forget to send back and you lose" captures are never hinted.
+  bool get hidesCaptureHints => game.rulesVersion == 'LUDO_MISSED_CAPTURE_V1';
 
   /// Progress thresholds for this match (server-sent, else from the rules version).
   final LudoBoardSpec board;
@@ -269,14 +277,22 @@ class LudoRuntimeSnapshot {
         game: LudoGameState.fromJson(Map<String, dynamic>.from(json['game'] as Map)),
         startingRoll: LudoStartingRollState.fromJson(Map<String, dynamic>.from(json['startingRoll'] as Map)),
         resignedPlayerIds: (json['resignedPlayerIds'] as List? ?? const []).map((e) => e.toString()).toList(growable: false),
+        missedCapturePlayerIds:
+            (json['missedCapturePlayerIds'] as List? ?? const []).map((e) => e.toString()).toList(growable: false),
         board: board,
       );
 
-  LudoRuntimeSnapshot copyWith({LudoGameState? game, LudoStartingRollState? startingRoll, List<String>? resignedPlayerIds}) =>
+  LudoRuntimeSnapshot copyWith({
+    LudoGameState? game,
+    LudoStartingRollState? startingRoll,
+    List<String>? resignedPlayerIds,
+    List<String>? missedCapturePlayerIds,
+  }) =>
       LudoRuntimeSnapshot(
         game: game ?? this.game,
         startingRoll: startingRoll ?? this.startingRoll,
         resignedPlayerIds: resignedPlayerIds ?? this.resignedPlayerIds,
+        missedCapturePlayerIds: missedCapturePlayerIds ?? this.missedCapturePlayerIds,
         board: board,
       );
 }

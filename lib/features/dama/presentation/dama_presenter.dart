@@ -57,16 +57,17 @@ class DamaPresenter {
     if (mustCapture) {
       return captureCount > 1 ? 'Capture is compulsory: take the most pieces.' : 'Capture is compulsory.';
     }
-    return 'Tap a piece, then a highlighted square.';
+    return 'Tap a piece, then where it goes.';
   }
 
-  /// Why a tap did nothing (never fail silently).
+  /// Why a tap did nothing (never fail silently). The board shows no move
+  /// hints, so this names the rule, not the square.
   String? get tapExplanation {
     if (game.finished) return null;
     if (!connected) return 'Reconnecting… try again in a moment.';
     if (!isMyTurn) return 'Wait for your turn.';
-    if (mustCapture) return 'You must capture with a glowing piece.';
-    return 'Pick one of your highlighted pieces.';
+    if (mustCapture) return 'You must capture: find the piece that can take.';
+    return 'That piece can’t move now.';
   }
 
   /// Draw-rule progress: plies left without a capture or man move (shown late).

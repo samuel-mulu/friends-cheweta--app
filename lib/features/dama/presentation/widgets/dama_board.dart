@@ -8,6 +8,10 @@ import 'package:friends_game_app/features/match/presentation/widgets/celebration
 /// The Dama board. Draws the server's board; when a new move arrives the piece
 /// travels its path hop by hop and each captured piece fades as it is jumped.
 /// Taps are reported as squares; the picker decides what they mean.
+///
+/// No move hints: it never marks which pieces can move or where they can go.
+/// Only the player's own picks show (the tapped piece and, in a multi-capture,
+/// the landing squares chosen so far), plus the last move.
 class DamaBoard extends StatefulWidget {
   const DamaBoard({
     super.key,
@@ -17,9 +21,6 @@ class DamaBoard extends StatefulWidget {
     this.lastMove,
     this.lastMovePromoted = false,
     this.selection = DamaSelection.none,
-    this.targets = const {},
-    this.movable = const {},
-    this.mustCapture = false,
     this.onTapSquare,
     this.onHop,
     this.hopMs = 230,
@@ -31,11 +32,6 @@ class DamaBoard extends StatefulWidget {
   final DamaMove? lastMove;
   final bool lastMovePromoted;
   final DamaSelection selection;
-  final Set<int> targets;
-  final Set<int> movable;
-
-  /// Movable pieces pulse when the player must capture.
-  final bool mustCapture;
   final ValueChanged<int>? onTapSquare;
 
   /// Each landing during a move animation (true when that hop captured).
@@ -48,7 +44,6 @@ class DamaBoard extends StatefulWidget {
 
 class _DamaBoardState extends State<DamaBoard> with TickerProviderStateMixin {
   late final AnimationController _move = AnimationController(vsync: this);
-  late final AnimationController _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
 
   /// Board before the animating move (pieces are drawn from it until it ends).
   String? _fromBoard;
@@ -64,7 +59,6 @@ class _DamaBoardState extends State<DamaBoard> with TickerProviderStateMixin {
     _move.addStatusListener((status) {
       if (status == AnimationStatus.completed) _finishMove();
     });
-    _syncPulse();
   }
 
   @override
@@ -79,17 +73,6 @@ class _DamaBoardState extends State<DamaBoard> with TickerProviderStateMixin {
       _move
         ..duration = Duration(milliseconds: widget.hopMs * (move.path.length - 1))
         ..forward(from: 0);
-    }
-    if (old.mustCapture != widget.mustCapture) _syncPulse();
-  }
-
-  void _syncPulse() {
-    if (widget.mustCapture) {
-      _pulse.repeat(reverse: true);
-    } else {
-      _pulse
-        ..stop()
-        ..value = 0;
     }
   }
 
@@ -119,7 +102,6 @@ class _DamaBoardState extends State<DamaBoard> with TickerProviderStateMixin {
   @override
   void dispose() {
     _move.dispose();
-    _pulse.dispose();
     super.dispose();
   }
 
@@ -146,11 +128,7 @@ class _DamaBoardState extends State<DamaBoard> with TickerProviderStateMixin {
                         board: _fromBoard ?? widget.board,
                         animating: _animating,
                         progress: _move,
-                        pulse: _pulse,
                         selection: widget.selection,
-                        targets: widget.targets,
-                        movable: widget.movable,
-                        mustCapture: widget.mustCapture,
                         lastMove: _animating == null ? widget.lastMove : null,
                       ),
                     ),
@@ -174,23 +152,15 @@ class _DamaBoardPainter extends CustomPainter {
     required this.board,
     required this.animating,
     required this.progress,
-    required this.pulse,
     required this.selection,
-    required this.targets,
-    required this.movable,
-    required this.mustCapture,
     required this.lastMove,
-  }) : super(repaint: Listenable.merge([progress, pulse]));
+  }) : super(repaint: progress);
 
   final DamaBoardGeometry geometry;
   final String board;
   final DamaMove? animating;
   final Animation<double> progress;
-  final Animation<double> pulse;
   final DamaSelection selection;
-  final Set<int> targets;
-  final Set<int> movable;
-  final bool mustCapture;
   final DamaMove? lastMove;
 
   @override
@@ -204,19 +174,6 @@ class _DamaBoardPainter extends CustomPainter {
       for (final square in move.path) {
         canvas.drawRect(g.squareRect(square).deflate(g.cell * 0.04), tint);
       }
-    }
-
-    // Pieces that may move: a soft ring (pulsing when a capture is compulsory).
-    for (final square in movable) {
-      final strength = mustCapture ? 0.45 + 0.55 * pulse.value : 0.5;
-      canvas.drawCircle(
-        g.center(square),
-        radius * (1.12 + (mustCapture ? 0.08 * pulse.value : 0)),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = g.cell * 0.06
-          ..color = (mustCapture ? DamaPalette.mustCapture : DamaPalette.goldLight).withValues(alpha: strength),
-      );
     }
 
     final moving = animating;
@@ -244,14 +201,10 @@ class _DamaBoardPainter extends CustomPainter {
           ..strokeWidth = g.cell * 0.08
           ..color = DamaPalette.target,
       );
+      // Landing squares the player already chose in a multi-capture.
       for (final step in selection.steps) {
         canvas.drawCircle(g.center(step), radius * 0.3, Paint()..color = DamaPalette.target.withValues(alpha: 0.8));
       }
-    }
-    for (final square in targets) {
-      final c = g.center(square);
-      canvas.drawCircle(c, radius * 0.42, Paint()..color = DamaPalette.target.withValues(alpha: 0.35));
-      canvas.drawCircle(c, radius * 0.22, Paint()..color = DamaPalette.target);
     }
 
     if (moving != null) {
@@ -274,9 +227,6 @@ class _DamaBoardPainter extends CustomPainter {
       old.board != board ||
       old.animating != animating ||
       old.selection != selection ||
-      old.targets != targets ||
-      old.movable != movable ||
-      old.mustCapture != mustCapture ||
       old.lastMove != lastMove ||
       old.geometry.size != geometry.size ||
       old.geometry.flipped != geometry.flipped;

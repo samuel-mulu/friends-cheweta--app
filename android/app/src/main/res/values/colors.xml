@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Friends brand (matches BrandColors in lib/core/widgets/app_logo.dart). -->
-    <color name="brand_navy">#0B1530</color>
-    <color name="brand_indigo">#1C2C6E</color>
+    <!-- Friends ጨዋታ brand (matches AppColors.night / BrandColors in lib/). The
+         native launch screen uses the same night as the Flutter splash, so
+         there is no colour jump when Flutter takes over. -->
+    <color name="brand_navy">#0B1120</color>
+    <color name="brand_indigo">#131B2E</color>
 </resources>

@@ -424,6 +424,10 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
         return 'Rejoining the match room…';
       case 'MATCH_NOT_ACTIVE':
         return 'This match is no longer active.';
+      case 'MATCH_NOT_PLAYING':
+        return state.snapshot?.game.phase == LudoMatchPhase.finished
+            ? 'This match is over.'
+            : 'Wait until the first roll decides who starts.';
       case 'SOCKET_DISCONNECTED':
         return 'Reconnecting… your move was not sent.';
       case 'ACK_TIMEOUT':

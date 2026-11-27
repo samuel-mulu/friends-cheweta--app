@@ -9,6 +9,7 @@ LudoRuntimeSnapshot reduceLudoEvent(LudoRuntimeSnapshot snapshot, RealtimeEvent 
   var game = snapshot.game.copyWith(version: version);
   var startingRoll = snapshot.startingRoll;
   final resigned = [...snapshot.resignedPlayerIds];
+  final missed = [...snapshot.missedCapturePlayerIds];
   final data = event.data;
   final playerId = data['playerId']?.toString();
 
@@ -81,7 +82,10 @@ LudoRuntimeSnapshot reduceLudoEvent(LudoRuntimeSnapshot snapshot, RealtimeEvent 
       game = _retire(game, data['tokenIds']);
       break;
     case 'ludo:player_resigned':
+    // "Forget to send back and you lose": out like a resignation.
+    case 'ludo:capture_missed':
       if (playerId != null && !resigned.contains(playerId)) resigned.add(playerId);
+      if (event.name == 'ludo:capture_missed' && playerId != null && !missed.contains(playerId)) missed.add(playerId);
       game = _retire(game, data['tokenIds']);
       break;
     case 'match:finished':
@@ -96,7 +100,7 @@ LudoRuntimeSnapshot reduceLudoEvent(LudoRuntimeSnapshot snapshot, RealtimeEvent 
       );
       break;
   }
-  return snapshot.copyWith(game: game, startingRoll: startingRoll, resignedPlayerIds: resigned);
+  return snapshot.copyWith(game: game, startingRoll: startingRoll, resignedPlayerIds: resigned, missedCapturePlayerIds: missed);
 }
 
 /// Presented-board step for a walk that just ended: the mover lands. Captured

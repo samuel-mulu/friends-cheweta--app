@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:friends_game_app/features/chat/application/match_chat_controller.dart';
+import 'package:friends_game_app/features/match/application/practice_launcher.dart';
 import 'package:friends_game_app/features/match/application/match_reactions_controller.dart';
 import 'package:friends_game_app/features/match/presentation/widgets/match_chat_sheet.dart';
 
@@ -43,21 +44,26 @@ Future<void> openMatchChat(BuildContext context, WidgetRef ref) async {
   controller.setPanelOpen(false);
 }
 
-/// "Leave the match?" — leaving a running match forfeits it.
-Future<bool> confirmLeaveMatch(BuildContext context) async =>
-    await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Leave the match?'),
-        content: const Text('Leaving now forfeits this match and your stake.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep playing')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Leave'),
-          ),
-        ],
-      ),
-    ) ==
-    true;
+/// "Leave the match?" — leaving a running match forfeits it. A practice game
+/// is free, so it says nothing about a stake.
+Future<bool> confirmLeaveMatch(BuildContext context, String matchId) async {
+  final practice = ProviderScope.containerOf(context, listen: false).read(practiceMatchIdsProvider).contains(matchId);
+  return await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(practice ? 'Leave practice?' : 'Leave the match?'),
+          content: Text(practice
+              ? 'This practice game ends here. It is free, so nothing is taken from your wallet.'
+              : 'Leaving now forfeits this match and your stake.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Wait')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Leave'),
+            ),
+          ],
+        ),
+      ) ==
+      true;
+}

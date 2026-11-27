@@ -255,9 +255,11 @@ class _BroadcastBanner extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final colors = Theme.of(context).colorScheme;
     return Material(
-      color: colors.primaryContainer,
-      elevation: 6,
-      borderRadius: BorderRadius.circular(14),
+      color: colors.surfaceContainerHigh,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: colors.outline),
+      ),
       child: Row(children: [
         Expanded(
             child: InkWell(
@@ -266,7 +268,7 @@ class _BroadcastBanner extends ConsumerWidget {
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Row(children: [
-              Icon(Icons.campaign_outlined, color: colors.onPrimaryContainer),
+              Icon(Icons.campaign_outlined, color: colors.primary),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
@@ -277,7 +279,7 @@ class _BroadcastBanner extends ConsumerWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: colors.onPrimaryContainer,
+                        color: colors.onSurface,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -285,9 +287,7 @@ class _BroadcastBanner extends ConsumerWidget {
                       notice.body,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: colors.onPrimaryContainer,
-                          ),
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
                 ),
@@ -297,7 +297,7 @@ class _BroadcastBanner extends ConsumerWidget {
         )),
         IconButton(
           tooltip: notice.canDismiss ? 'Dismiss announcement' : 'Close banner',
-          icon: Icon(Icons.close_rounded, color: colors.onPrimaryContainer),
+          icon: Icon(Icons.close_rounded, color: colors.onSurfaceVariant),
           onPressed: () async {
             final controller = ref.read(broadcastControllerProvider.notifier);
             final messenger = ScaffoldMessenger.maybeOf(context);

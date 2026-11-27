@@ -9,6 +9,8 @@ import 'package:friends_game_app/core/theme/app_theme.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/chat/application/match_chat_controller.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
+import 'package:friends_game_app/features/game_hub/domain/game_variant.dart';
+import 'package:friends_game_app/features/game_hub/presentation/widgets/variant_picker.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_feedback.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_match_controller.dart';
 import 'package:friends_game_app/features/ludo/application/ludo_scene.dart';
@@ -22,6 +24,7 @@ import 'package:friends_game_app/features/match/presentation/widgets/celebration
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_board.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/ludo_seat.dart';
 import 'package:friends_game_app/features/match/presentation/match_sheets.dart';
+import 'package:friends_game_app/features/match/presentation/widgets/match_back_guard.dart';
 import 'package:friends_game_app/features/match/presentation/widgets/match_chrome.dart';
 import 'package:friends_game_app/features/match/presentation/widgets/table_backdrop.dart';
 import 'package:friends_game_app/features/ludo/presentation/widgets/turn_banner.dart';
@@ -178,7 +181,19 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
   void _completeScene(int sequence) => ref.read(ludoTimelineProvider.notifier).completeScene(sequence);
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => MatchBackGuard(onBack: () => _onSystemBack(context), child: _screen(context));
+
+  /// Phone back: ask before leaving a live match; a finished one opens its result.
+  void _onSystemBack(BuildContext context) {
+    final game = ref.read(ludoMatchControllerProvider).snapshot?.game;
+    if (game == null) {
+      context.go(GameRoutes.lobby(GameCodes.ludo));
+      return;
+    }
+    _confirmExit(context, game);
+  }
+
+  Widget _screen(BuildContext context) {
     ref.listen(ludoTimelineProvider, _onTimeline);
     ref.listen(ludoMatchControllerProvider.select((s) => s.snapshot?.game.version), (_, __) => _maybePingMyTurn());
     ref.listen(matchReactionsProvider, (previous, next) {
@@ -291,6 +306,14 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
                     onReact: () => showMatchReactionPicker(context, ref),
                     onToggleSound: () => ref.read(playerPreferencesProvider.notifier).setSound(!soundOn),
                     onMenu: () => _openMenu(context, match),
+                    // The match's type (መመለስ ያለበት / የሌለበት / የረሳ ይሸነፋል); tap for what each means.
+                    badge: switch (GameVariants.find(game.rulesVersion)) {
+                      final variant? => GestureDetector(
+                          onTap: () => showGameTypes(context, GameCodes.ludo),
+                          child: VariantTag(variant: variant, emphasized: true),
+                        ),
+                      null => null,
+                    },
                   ),
                   Expanded(
                     child: Padding(
@@ -399,10 +422,10 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       context.pushReplacement(GameRoutes.result(GameCodes.ludo, widget.matchId));
       return;
     }
-    final leave = await confirmLeaveMatch(context);
+    final leave = await confirmLeaveMatch(context, widget.matchId);
     if (leave != true || !context.mounted) return;
     final ok = await ref.read(ludoMatchControllerProvider.notifier).resign();
-    if (ok && context.mounted) context.go('/home');
+    if (ok && context.mounted) context.go(GameRoutes.lobby(GameCodes.ludo));
   }
 
   Future<void> _confirmResign(BuildContext context) async {

@@ -7,6 +7,7 @@ import 'package:friends_game_app/features/auth/presentation/controllers/auth_con
 import 'package:friends_game_app/features/chat/domain/chat_message.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
+import 'package:friends_game_app/features/game_hub/domain/game_variant.dart';
 import 'package:friends_game_app/features/live_lobby/domain/lobby_challenge.dart';
 import 'package:friends_game_app/features/live_lobby/domain/lobby_player.dart';
 
@@ -76,6 +77,17 @@ class LiveLobbyState {
 
   /// Rules version (game type, e.g. Dama እግረኛ / ታንከኛ) of the stake I sit at.
   String? get myRules => myStake?.rulesVersion;
+
+  /// The game's types that have catalog stakes, in their usual order. The
+  /// lobby offers a type picker (and type badges) when there are two or more.
+  List<GameVariant> get offeredVariants {
+    final code = gameCode;
+    if (code == null) return const [];
+    return GameVariants.of(code).where((variant) => offersAll([variant.rulesVersion])).toList();
+  }
+
+  /// The type of the stake I sit at, in a lobby that offers types.
+  GameVariant? get myVariant => offeredVariants.length > 1 ? GameVariants.find(myRules) : null;
 
   /// Whether the catalog has stakes of every one of [rulesVersions], so a
   /// type picker makes sense.
@@ -339,8 +351,26 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
     await changeStake(target.id);
   }
 
-  Future<void> ready() => _simpleCommand('lobby:ready');
-  Future<void> unready() => _simpleCommand('lobby:unready');
+  /// What the player asked for the last time they got ready (reused when a
+  /// stake change keeps them ready).
+  ({int? tokensToWin, bool autoMatch}) _readyPrefs = (tokensToWin: null, autoMatch: true);
+
+  /// Get ready at my stake, saying what I play: the Ludo goal ([tokensToWin],
+  /// other games ignore it) and whether to be matched automatically. With
+  /// auto-match on, the server starts a match with the next player ready at
+  /// the same terms (it arrives as an accepted request, like any other).
+  Future<void> ready({int? tokensToWin, bool? autoMatch}) async {
+    _readyPrefs = (tokensToWin: tokensToWin ?? _readyPrefs.tokensToWin, autoMatch: autoMatch ?? _readyPrefs.autoMatch);
+    final rejectedTerms = await _simpleCommand('lobby:ready', {
+      if (_readyPrefs.tokensToWin != null) 'tokensToWin': _readyPrefs.tokensToWin,
+      'autoMatch': _readyPrefs.autoMatch,
+    });
+    // A server from before ready terms existed rejects the unknown fields:
+    // get ready the old way (no goal, no auto-match) rather than not at all.
+    if (rejectedTerms) await _simpleCommand('lobby:ready');
+  }
+
+  Future<void> unready() async => _simpleCommand('lobby:unready');
 
   /// Leave the lobby. Local state is reset first so a reconnect racing this
   /// call cannot rejoin.
@@ -352,8 +382,11 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
     } catch (_) {}
   }
 
-  /// Ask a ready player to play, at their stake (switching ours first if needed).
-  Future<void> challenge(LobbyPlayer player, {int tokensToWin = 4}) async {
+  /// Ask a ready player to play, at their stake (switching ours first if
+  /// needed) and, in Ludo, their goal: the waiting player said what they play
+  /// (the server holds them to it too).
+  Future<void> challenge(LobbyPlayer player, {int? tokensToWin}) async {
+    tokensToWin = player.tokensToWin ?? tokensToWin ?? 4;
     // Being ONLINE is enough: the server readies the challenger in the same step.
     if (!player.isReady || state.busy || state.activeChallenge != null || state.isChallenged) return;
     final theirStake = player.gameModeId;
@@ -446,22 +479,36 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
     if (state.chatUnread != 0) state = state.copyWith(chatUnread: 0);
   }
 
+  /// The lobby chat is on screen: nothing there is unread.
+  bool _chatOpen = false;
+
+  void setChatOpen(bool open) {
+    _chatOpen = open;
+    if (open) clearChatUnread();
+  }
+
   void clearError() {
     if (state.error != null) state = state.copyWith(clearError: true);
   }
 
-  Future<void> _simpleCommand(String event) async {
-    if (state.busy) return;
+  /// Sends [event]; returns true only when the server rejected [payload]'s
+  /// extra fields as unknown (an older server), so the caller may retry
+  /// without them. That rejection is not shown as an error.
+  Future<bool> _simpleCommand(String event, [Map<String, dynamic> payload = const {}]) async {
+    if (state.busy) return false;
     state = state.copyWith(busy: true, clearError: true);
     try {
-      final ack = await ref.read(gameSocketServiceProvider).emitWithAck(event, {'commandId': _uuid.v4()});
+      final ack = await ref.read(gameSocketServiceProvider).emitWithAck(event, {'commandId': _uuid.v4(), ...payload});
+      final unknownFields = ack['ok'] != true && payload.isNotEmpty && '${ack['message']}'.contains('should not exist');
       state = state.copyWith(
         busy: false,
-        error: ack['ok'] == true ? null : _message(ack),
-        clearError: ack['ok'] == true,
+        error: ack['ok'] == true || unknownFields ? null : _message(ack),
+        clearError: ack['ok'] == true || unknownFields,
       );
+      return unknownFields;
     } catch (_) {
       state = state.copyWith(busy: false, error: 'Something went wrong. Try again.');
+      return false;
     }
   }
 
@@ -633,7 +680,8 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
     state = state.copyWith(
       messages: next.length > 50 ? next.sublist(next.length - 50) : next,
       sendingMessage: false,
-      chatUnread: state.chatUnread + 1,
+      // Live (socket): others' messages while the chat is not on screen.
+      chatUnread: _chatOpen || message.sender.userId == state.currentUserId ? state.chatUnread : state.chatUnread + 1,
       clearError: true,
     );
   }

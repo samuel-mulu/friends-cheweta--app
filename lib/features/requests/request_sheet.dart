@@ -3,7 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:friends_game_app/app/router.dart';
 import 'package:friends_game_app/core/theme/app_colors.dart';
+import 'package:friends_game_app/core/theme/app_type.dart';
 import 'package:friends_game_app/core/utils/money_formatter.dart';
+import 'package:friends_game_app/features/game_hub/domain/game_variant.dart';
+import 'package:friends_game_app/features/game_hub/presentation/widgets/variant_picker.dart';
 import 'package:friends_game_app/core/widgets/ui.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
@@ -213,19 +216,29 @@ class _Terms extends StatelessWidget {
           ]),
         );
     final bold = theme.textTheme.titleSmall;
+    // A stake of a named type (Dama እግረኛ, Ludo መመለስ የሌለበት…): say what differs.
+    final type = GameVariants.find(stake?.rulesVersion);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      decoration: BoxDecoration(color: palette.surfaceAlt, borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(
+        color: palette.background,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: palette.border),
+      ),
       child: Column(children: [
         row('Game', Text(game, style: bold)),
+        if (type != null) ...[
+          row('Type', VariantTag(variant: type, emphasized: true, large: true)),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Align(alignment: Alignment.centerRight, child: Text(type.rule, textAlign: TextAlign.end, style: theme.textTheme.bodySmall)),
+          ),
+        ],
         if (stake != null) ...[
-          row('Your stake', StakePill(amountMinor: stake!.stakeAmountMinor)),
+          row('Your stake', Text(MoneyFormatter.compactEtb(stake!.stakeAmountMinor), style: AppType.money(size: 19, color: theme.colorScheme.onSurface))),
           row(
             'Winner gets',
-            Text(
-              MoneyFormatter.compactEtb(stake!.estimatedWinnerPayoutMinor),
-              style: bold?.copyWith(color: palette.money, fontFeatures: const [FontFeature.tabularFigures()]),
-            ),
+            Text(MoneyFormatter.compactEtb(stake!.estimatedWinnerPayoutMinor), style: AppType.money(size: 21, color: palette.money)),
           ),
         ],
         if (tokensToWin != null)

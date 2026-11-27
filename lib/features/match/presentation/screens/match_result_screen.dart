@@ -59,124 +59,146 @@ class _MatchResultScreenState extends ConsumerState<MatchResultScreen> {
     ref.listen(rematchControllerProvider.select((s) => s.newMatchId), (previous, next) {
       if (next != null && next != previous) context.go(GameRoutes.match(widget.gameCode, next));
     });
-    return Scaffold(
-      appBar: AppBar(automaticallyImplyLeading: false, title: const Text('Match result')),
-      body: detail.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) {
-          if (_polls < 15) {
-            return const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) context.go(GameRoutes.lobby(widget.gameCode));
+      },
+      child: Scaffold(
+        appBar: AppBar(automaticallyImplyLeading: false, title: const Text('Match result')),
+        body: detail.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (_, __) {
+            if (_polls < 15) {
+              return const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text('Loading settlement details…'),
+                  ],
+                ),
+              );
+            }
+            return AppErrorView(
+              message: 'The result is confirmed, but settlement details could not be loaded yet.',
+              onRetry: () => ref.invalidate(matchDetailProvider(widget.matchId)),
+            );
+          },
+          data: (match) {
+            final mine = me == null ? null : match.participant(me);
+            final draw = match.isDraw;
+            final won = !draw && (mine?.resultPosition == 1 || (match.winnerOrder.isNotEmpty && match.winnerOrder.first == me));
+            final settlement = match.settlement;
+            final processing = match.status == 'FINISHING' || settlement == null;
+            return SafeArea(
+              child: ListView(
+                padding: const EdgeInsets.all(24),
                 children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Loading settlement details…'),
+                  const SizedBox(height: 20),
+                  CircleAvatar(
+                    radius: 38,
+                    child: Icon(
+                        draw
+                            ? Icons.handshake_outlined
+                            : won
+                                ? Icons.emoji_events_rounded
+                                : Icons.sports_esports_rounded,
+                        size: 38),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                      draw
+                          ? 'Draw'
+                          : won
+                              ? 'Victory'
+                              : 'Match complete',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.headlineMedium),
+                  const SizedBox(height: 6),
+                  Text(
+                    draw
+                        ? 'No winner this time. Stakes are returned to both players.'
+                        : won
+                            ? 'Your result is confirmed by the server.'
+                            : 'The server has confirmed the final result.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 28),
+                  if (match.isPractice)
+                    const Card(
+                      child: ListTile(
+                        leading: Icon(Icons.smart_toy_outlined),
+                        title: Text('Practice game'),
+                        subtitle: Text('Free game against the computer. No stake, no stats.'),
+                      ),
+                    )
+                  else ...[
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: Column(children: [
+                          _ResultRow(label: 'Stake', value: MoneyFormatter.minorToEtb(BigInt.from(match.stakeAmountMinor))),
+                          if (settlement != null) ...[
+                            _ResultRow(label: 'Pot', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.potAmountMinor))),
+                            if (draw)
+                              const _ResultRow(label: 'Stakes', value: 'Returned')
+                            else ...[
+                              _ResultRow(label: 'Platform fee', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.platformFeeMinor))),
+                              _ResultRow(
+                                  label: 'Winner payout', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.payoutAmountMinor))),
+                            ],
+                          ],
+                        ]),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    if (processing)
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(children: [
+                            const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                            const SizedBox(width: 12),
+                            Expanded(
+                                child: Text('Result confirmed. Prize settlement is processing…',
+                                    style: Theme.of(context).textTheme.bodyMedium)),
+                          ]),
+                        ),
+                      )
+                    else
+                      const Card(
+                        child: ListTile(
+                          leading: Icon(Icons.verified_rounded),
+                          title: Text('Settlement complete'),
+                          subtitle: Text('Wallet and ledger were updated by the backend.'),
+                        ),
+                      ),
+                  ],
+                  const SizedBox(height: 24),
+                  if (match.isPractice) ...[
+                    _PlayAgainCard(gameCode: widget.gameCode),
+                    const SizedBox(height: 16),
+                  ] else if (match.status == 'FINISHED' && me != null) ...[
+                    _RematchCard(me: me),
+                    const SizedBox(height: 16),
+                  ],
+                  FilledButton.tonalIcon(
+                    onPressed: () => context.go(GameRoutes.lobby(widget.gameCode)),
+                    icon: const Icon(Icons.groups_rounded),
+                    label: const Text('Find another player'),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton(onPressed: () => context.go('/home'), child: const Text('Back to home')),
+                  const SizedBox(height: 10),
+                  TextButton(onPressed: () => context.push('/history/${widget.matchId}'), child: const Text('View match details')),
                 ],
               ),
             );
-          }
-          return AppErrorView(
-            message: 'The result is confirmed, but settlement details could not be loaded yet.',
-            onRetry: () => ref.invalidate(matchDetailProvider(widget.matchId)),
-          );
-        },
-        data: (match) {
-          final mine = me == null ? null : match.participant(me);
-          final draw = match.isDraw;
-          final won = !draw && (mine?.resultPosition == 1 || (match.winnerOrder.isNotEmpty && match.winnerOrder.first == me));
-          final settlement = match.settlement;
-          final processing = match.status == 'FINISHING' || settlement == null;
-          return SafeArea(
-            child: ListView(
-              padding: const EdgeInsets.all(24),
-              children: [
-                const SizedBox(height: 20),
-                CircleAvatar(
-                  radius: 38,
-                  child: Icon(draw ? Icons.handshake_outlined : won ? Icons.emoji_events_rounded : Icons.sports_esports_rounded, size: 38),
-                ),
-                const SizedBox(height: 18),
-                Text(draw ? 'Draw' : won ? 'Victory' : 'Match complete', textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineMedium),
-                const SizedBox(height: 6),
-                Text(
-                  draw
-                      ? 'No winner this time. Stakes are returned to both players.'
-                      : won
-                          ? 'Your result is confirmed by the server.'
-                          : 'The server has confirmed the final result.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 28),
-                if (match.isPractice)
-                  const Card(
-                    child: ListTile(
-                      leading: Icon(Icons.smart_toy_outlined),
-                      title: Text('Practice game'),
-                      subtitle: Text('Free game against the computer. No stake, no stats.'),
-                    ),
-                  )
-                else ...[
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: Column(children: [
-                        _ResultRow(label: 'Stake', value: MoneyFormatter.minorToEtb(BigInt.from(match.stakeAmountMinor))),
-                        if (settlement != null) ...[
-                          _ResultRow(label: 'Pot', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.potAmountMinor))),
-                          if (draw)
-                            const _ResultRow(label: 'Stakes', value: 'Returned')
-                          else ...[
-                            _ResultRow(label: 'Platform fee', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.platformFeeMinor))),
-                            _ResultRow(label: 'Winner payout', value: MoneyFormatter.minorToEtb(BigInt.from(settlement.payoutAmountMinor))),
-                          ],
-                        ],
-                      ]),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  if (processing)
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Row(children: [
-                          const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                          const SizedBox(width: 12),
-                          Expanded(child: Text('Result confirmed. Prize settlement is processing…', style: Theme.of(context).textTheme.bodyMedium)),
-                        ]),
-                      ),
-                    )
-                  else
-                    const Card(
-                      child: ListTile(
-                        leading: Icon(Icons.verified_rounded),
-                        title: Text('Settlement complete'),
-                        subtitle: Text('Wallet and ledger were updated by the backend.'),
-                      ),
-                    ),
-                ],
-                const SizedBox(height: 24),
-                if (match.isPractice) ...[
-                  _PlayAgainCard(gameCode: widget.gameCode),
-                  const SizedBox(height: 16),
-                ] else if (match.status == 'FINISHED' && me != null) ...[
-                  _RematchCard(me: me),
-                  const SizedBox(height: 16),
-                ],
-                FilledButton.tonalIcon(
-                  onPressed: () => context.go(GameRoutes.lobby(widget.gameCode)),
-                  icon: const Icon(Icons.groups_rounded),
-                  label: const Text('Find another player'),
-                ),
-                const SizedBox(height: 10),
-                OutlinedButton(onPressed: () => context.go('/home'), child: const Text('Back to home')),
-                const SizedBox(height: 10),
-                TextButton(onPressed: () => context.push('/history/${widget.matchId}'), child: const Text('View match details')),
-              ],
-            ),
-          );
-        },
+          },
+        ),
       ),
     );
   }

@@ -15,10 +15,12 @@ import 'package:friends_game_app/features/dama/presentation/dama_presenter.dart'
 import 'package:friends_game_app/features/dama/presentation/widgets/dama_board.dart';
 import 'package:friends_game_app/features/dama/presentation/widgets/dama_paint.dart';
 import 'package:friends_game_app/features/dama/presentation/widgets/dama_seat.dart';
-import 'package:friends_game_app/features/dama/presentation/widgets/dama_type_picker.dart';
+import 'package:friends_game_app/features/game_hub/domain/game_variant.dart';
+import 'package:friends_game_app/features/game_hub/presentation/widgets/variant_picker.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/match/application/match_reactions_controller.dart';
 import 'package:friends_game_app/features/match/presentation/match_sheets.dart';
+import 'package:friends_game_app/features/match/presentation/widgets/match_back_guard.dart';
 import 'package:friends_game_app/features/match/presentation/widgets/celebration.dart';
 import 'package:friends_game_app/features/match/presentation/widgets/match_chrome.dart';
 import 'package:friends_game_app/features/profile/presentation/controllers/preferences_controller.dart';
@@ -136,7 +138,19 @@ class _DamaMatchScreenState extends ConsumerState<DamaMatchScreen> with WidgetsB
   int get _hopMs => ref.read(playerPreferencesProvider).fastAnimations ? 150 : 230;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => MatchBackGuard(onBack: () => _onSystemBack(context), child: _screen(context));
+
+  /// Phone back: ask before leaving a live match; a finished one opens its result.
+  void _onSystemBack(BuildContext context) {
+    final game = ref.read(damaMatchControllerProvider).game;
+    if (game == null) {
+      context.go(GameRoutes.lobby(GameCodes.dama));
+      return;
+    }
+    _exit(context, game);
+  }
+
+  Widget _screen(BuildContext context) {
     ref.listen<DamaGame?>(damaMatchControllerProvider.select((s) => s.game), _onGameChanged);
     ref.listen(damaMatchControllerProvider.select((s) => s.autoPlayNotice), (previous, next) {
       if (next == null || next.seq == previous?.seq) return;
@@ -172,7 +186,8 @@ class _DamaMatchScreenState extends ConsumerState<DamaMatchScreen> with WidgetsB
     // A selection only lives as long as the legal moves it was made from.
     if (!identical(_selectionBase, view.legal)) {
       _selectionBase = view.legal;
-      _selection = DamaPicker.initial(view.legal);
+      // No move hints: nothing is picked for the player, even a forced capture.
+      _selection = DamaSelection.none;
     }
 
     DamaSeat seat(String? userId, {required bool isMe}) {
@@ -201,13 +216,8 @@ class _DamaMatchScreenState extends ConsumerState<DamaMatchScreen> with WidgetsB
       child: Scaffold(
         backgroundColor: DamaPalette.tableBottom,
         body: Stack(children: [
-          const Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(center: Alignment(0, -0.2), radius: 1.2, colors: [DamaPalette.tableTop, DamaPalette.tableBottom]),
-              ),
-            ),
-          ),
+          // A flat dark wood table under the board (the board itself is the art).
+          const Positioned.fill(child: ColoredBox(color: DamaPalette.tableBottom)),
           SafeArea(
             child: Column(children: [
               MatchConnectionBanner(status: socket, recovering: match.recovering),
@@ -229,8 +239,8 @@ class _DamaMatchScreenState extends ConsumerState<DamaMatchScreen> with WidgetsB
                   child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                     // Which Dama this is (እግረኛ / ታንከኛ); tap for the rules.
                     GestureDetector(
-                      onTap: () => showDamaRules(context, type: game.type),
-                      child: DamaTypeTag(type: game.type, emphasized: true),
+                      onTap: () => showDamaRules(context, variant: game.variant),
+                      child: VariantTag(variant: game.variant, emphasized: true),
                     ),
                     const SizedBox(height: 10),
                     seat(view.opponentId, isMe: false),
@@ -247,9 +257,6 @@ class _DamaMatchScreenState extends ConsumerState<DamaMatchScreen> with WidgetsB
                           lastMove: game.lastMove,
                           lastMovePromoted: _lastMovePromoted,
                           selection: _selection,
-                          targets: DamaPicker.targets(view.legal, _selection),
-                          movable: DamaPicker.movable(view.legal),
-                          mustCapture: view.mustCapture && view.canAct,
                           onTapSquare: (square) => _onTap(view, square),
                           onHop: (capture) => _play(capture ? GameSound.capture : GameSound.step, volume: capture ? 1 : 0.5),
                           hopMs: _hopMs,
@@ -305,9 +312,9 @@ class _DamaMatchScreenState extends ConsumerState<DamaMatchScreen> with WidgetsB
       context.pushReplacement(GameRoutes.result(GameCodes.dama, widget.matchId));
       return;
     }
-    if (!await confirmLeaveMatch(context) || !context.mounted) return;
+    if (!await confirmLeaveMatch(context, widget.matchId) || !context.mounted) return;
     final ok = await ref.read(damaMatchControllerProvider.notifier).resign();
-    if (ok && context.mounted) context.go('/home');
+    if (ok && context.mounted) context.go(GameRoutes.lobby(GameCodes.dama));
   }
 
   Future<void> _openMenu(BuildContext context, DamaMatchViewState match) async {
@@ -324,7 +331,7 @@ class _DamaMatchScreenState extends ConsumerState<DamaMatchScreen> with WidgetsB
             title: const Text('How to play'),
             onTap: () {
               Navigator.pop(sheet);
-              showDamaRules(context, type: match.game?.type);
+              showDamaRules(context, variant: match.game?.variant);
             },
           ),
           ListTile(
@@ -341,7 +348,7 @@ class _DamaMatchScreenState extends ConsumerState<DamaMatchScreen> with WidgetsB
               title: Text('Resign', style: TextStyle(color: Theme.of(context).colorScheme.error)),
               onTap: () async {
                 Navigator.pop(sheet);
-                if (await confirmLeaveMatch(context)) await ref.read(damaMatchControllerProvider.notifier).resign();
+                if (await confirmLeaveMatch(context, widget.matchId)) await ref.read(damaMatchControllerProvider.notifier).resign();
               },
             ),
           Consumer(
@@ -360,7 +367,7 @@ class _DamaMatchScreenState extends ConsumerState<DamaMatchScreen> with WidgetsB
 
 /// The rules in plain words. In a match [type] is that match's Dama type;
 /// from the lobby (null) both types are explained.
-Future<void> showDamaRules(BuildContext context, {DamaType? type}) => showModalBottomSheet<void>(
+Future<void> showDamaRules(BuildContext context, {GameVariant? variant}) => showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -373,12 +380,12 @@ Future<void> showDamaRules(BuildContext context, {DamaType? type}) => showModalB
           children: [
             Row(children: [
               const Expanded(child: Text('How to play Dama', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
-              if (type != null) DamaTypeTag(type: type, emphasized: true, large: true),
+              if (variant != null) VariantTag(variant: variant, emphasized: true, large: true),
             ]),
             const SizedBox(height: 12),
-            if (type == null) ...[
+            if (variant == null) ...[
               const _Rule(Icons.call_split_rounded, 'Two types', 'Choose one before you play. Only how men capture differs.'),
-              for (final each in DamaType.values) _Rule(each.icon, '${each.name} · ${each.hint}', each.captureRule),
+              for (final each in GameVariants.of('DAMA')) _Rule(each.icon, '${each.name} · ${each.hint}', each.rule),
               const Divider(height: 24),
             ],
             const _Rule(Icons.grid_on_rounded, 'Dark squares only', '12 pieces each. Light moves first.'),
@@ -386,11 +393,11 @@ Future<void> showDamaRules(BuildContext context, {DamaType? type}) => showModalB
             _Rule(
               Icons.bolt_rounded,
               'Capture is compulsory',
-              switch (type) {
-                DamaType.egregna => 'Jump an enemy piece next to you, forward only. Keep jumping forward while you can.',
-                DamaType.tankegna => 'Jump an enemy piece next to you, forward or backward. Keep jumping while you can.',
-                null => 'Jump an enemy piece next to you (backward too in ${DamaType.tankegna.name}). Keep jumping while you can.',
-              },
+              variant == null
+                  ? 'Jump an enemy piece next to you (backward too in ${GameVariants.damaClassic.name}). Keep jumping while you can.'
+                  : variant == GameVariants.damaForward
+                      ? 'Jump an enemy piece next to you, forward only. Keep jumping forward while you can.'
+                      : 'Jump an enemy piece next to you, forward or backward. Keep jumping while you can.',
             ),
             const _Rule(Icons.format_list_numbered_rounded, 'Take the most',
                 'If several captures exist you must take the one with the most pieces.'),

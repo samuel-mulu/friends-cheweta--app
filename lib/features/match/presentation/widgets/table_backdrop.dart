@@ -1,23 +1,15 @@
 import 'package:flutter/material.dart';
 
-/// Deep navy table with a faint scattered-dice pattern.
+/// The night table (flat) with a faint scattered-dice pattern.
 class TableBackdrop extends CustomPainter {
   const TableBackdrop();
 
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..shader = const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF0B1530), Color(0xFF13306B), Color(0xFF0B1530)],
-        ).createShader(rect),
-    );
-    final tile = Paint()..color = Colors.white.withValues(alpha: 0.035);
-    final pip = Paint()..color = Colors.white.withValues(alpha: 0.05);
+    canvas.drawRect(rect, Paint()..color = const Color(0xFF0B1120));
+    final tile = Paint()..color = Colors.white.withValues(alpha: 0.028);
+    final pip = Paint()..color = Colors.white.withValues(alpha: 0.04);
     const step = 74.0;
     canvas.save();
     canvas.rotate(-0.35);

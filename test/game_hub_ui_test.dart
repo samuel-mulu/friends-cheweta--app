@@ -135,7 +135,8 @@ void main() {
       await _showHub(tester, hub: hub, socket: socket, lobby: true);
 
       expect(find.text(message), findsOneWidget);
-      expect(find.text('Practice with a bot'), findsOneWidget);
+      // Practice stays reachable (header icon) even when the lobby can't load.
+      expect(find.byTooltip('Practice with a bot (free)'), findsOneWidget);
       expect(socket.sent, isNot(contains('lobby:join_game')));
 
       await tester.tap(find.text('Retry'));
@@ -175,7 +176,7 @@ void main() {
   });
 
   testWidgets(
-      'narrow hub and lobby fit larger text and keep custom stake in the picker',
+      'narrow hub and lobby fit larger text and keep custom stake in the stake grid',
       (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(320, 700);
@@ -187,19 +188,72 @@ void main() {
     await _showHub(tester, hub: _Hub(_catalog), socket: socket, textScale: 1.3);
 
     expect(tester.takeException(), isNull);
-    expect(find.text('Friends'), findsOneWidget);
+    expect(find.textContaining('FRIENDS', findRichText: true), findsOneWidget);
+    // Narrow: every live game is one full-width card.
     final cards = find.byType(LiveGameCard);
-    expect(tester.getSize(cards.at(2)).width,
-        greaterThan(tester.getSize(cards.first).width * 2));
+    expect(tester.getSize(cards.at(2)).width, tester.getSize(cards.first).width);
 
     await tester.tap(find.text('Ludo'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.text('Players'), findsOneWidget);
-    expect(find.text('Custom stake'), findsNothing);
-    await tester.tap(find.text('Your stake'));
+    // The stake grid sits in the thumb zone; "Other amount" opens the custom stake.
+    expect(find.text('Play for any amount'), findsNothing);
+    await tester.tap(find.text('Other amount'));
     await tester.pumpAndSettle();
-    expect(find.text('Custom stake'), findsOneWidget);
+    expect(find.text('Play for any amount'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('after "I\'m ready" the panel folds into a waiting bar; Edit stops waiting',
+      (tester) async {
+    final readies = <Map<String, dynamic>>[];
+    final socket = FakeSocket()
+      ..reply = (event, payload) {
+        if (event == 'lobby:ready') readies.add(payload);
+        return event == 'lobby:join_game' ? _lobbyReply : {'ok': true};
+      };
+    await _showHub(tester, hub: _Hub(_catalog), socket: socket, lobby: true);
+
+    // Ludo: the goal is chosen in the panel (crowns), no dialog.
+    expect(find.text('Auto-match'), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel('First to 2 home'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining("I'm ready", findRichText: true));
+    await tester.pump();
+    expect(readies.single, allOf(containsPair('tokensToWin', 2), containsPair('autoMatch', true)));
+
+    // The server confirms: I'm ready → the panel folds.
+    socket.push('lobby:player_ready', {
+      'gameModeId': 'ludo-10',
+      'player': {'userId': 'me', 'displayName': 'Me', 'state': 'READY', 'gameModeId': 'ludo-10', 'tokensToWin': 2, 'autoMatch': true},
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Looking for a player…'), findsOneWidget);
+    expect(find.text('Auto-match'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    socket.sent.clear();
+    await tester.tap(find.text('Edit'));
+    await tester.pump();
+    expect(socket.sent, ['lobby:unready']);
+    await tester.pumpWidget(const SizedBox()); // stop the waiting loader
+  });
+
+  testWidgets('the arrow hides and shows the panel; "I\'m ready" stays in reach', (tester) async {
+    final socket = FakeSocket()..reply = (event, _) => event == 'lobby:join_game' ? _lobbyReply : {'ok': true};
+    await _showHub(tester, hub: _Hub(_catalog), socket: socket, lobby: true);
+    expect(find.text('Auto-match'), findsOneWidget);
+
+    await tester.tap(find.bySemanticsLabel('Hide the panel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Auto-match'), findsNothing);
+    expect(find.textContaining("I'm ready", findRichText: true), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.bySemanticsLabel('Show the panel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Auto-match'), findsOneWidget);
   });
 }

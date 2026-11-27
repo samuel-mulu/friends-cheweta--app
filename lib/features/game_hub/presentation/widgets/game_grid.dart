@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:friends_game_app/core/theme/app_colors.dart';
+import 'package:friends_game_app/core/theme/app_type.dart';
 import 'package:friends_game_app/core/widgets/ui.dart';
 import 'package:friends_game_app/features/dama/presentation/widgets/dama_paint.dart';
 import 'package:friends_game_app/features/karta/presentation/widgets/karta_cards.dart';
@@ -33,13 +34,13 @@ class GameCatalogEntry {
 
 /// Live games first (in the order players use them), then what is coming.
 const gameCatalog = <GameCatalogEntry>[
-  GameCatalogEntry(code: 'LUDO', name: 'Ludo', tagline: 'Classic 1v1 · Race home', tile: AppColors.navy, route: '/ludo'),
-  GameCatalogEntry(code: 'DAMA', name: 'Dama', tagline: 'Ethiopian draughts', tile: Color(0xFF5A3417), route: '/dama'),
-  GameCatalogEntry(code: 'KARTA', name: 'Karta Lat Lat', tagline: 'Call the card, catch it first', tile: Color(0xFF0E4A33), route: '/karta'),
-  GameCatalogEntry(code: 'BINGO', name: 'Bingo', tagline: 'Coming soon', tile: Color(0xFF2B2F45), icon: Icons.grid_on_rounded),
-  GameCatalogEntry(code: 'CHESS', name: 'Chess', tagline: 'Coming soon', tile: Color(0xFF2B2F45), icon: Icons.castle_rounded),
-  GameCatalogEntry(code: 'CARDS', name: 'Card Games', tagline: 'Coming soon', tile: Color(0xFF2B2F45), icon: Icons.style_rounded),
-  GameCatalogEntry(code: 'TIC_TAC_TOE', name: 'Tic-Tac-Toe', tagline: 'Coming soon', tile: Color(0xFF2B2F45), icon: Icons.tag_rounded),
+  GameCatalogEntry(code: 'LUDO', name: 'Ludo', tagline: 'Classic 1v1, race home', tile: Color(0xFF16264F), route: '/ludo'),
+  GameCatalogEntry(code: 'DAMA', name: 'Dama', tagline: 'Ethiopian draughts', tile: Color(0xFF4A2C14), route: '/dama'),
+  GameCatalogEntry(code: 'KARTA', name: 'Karta Lat Lat', tagline: 'Call the card, catch it first', tile: Color(0xFF0E3B2A), route: '/karta'),
+  GameCatalogEntry(code: 'BINGO', name: 'Bingo', tagline: 'Coming soon', tile: AppColors.raised, icon: Icons.grid_on_rounded),
+  GameCatalogEntry(code: 'CHESS', name: 'Chess', tagline: 'Coming soon', tile: AppColors.raised, icon: Icons.castle_rounded),
+  GameCatalogEntry(code: 'CARDS', name: 'Card Games', tagline: 'Coming soon', tile: AppColors.raised, icon: Icons.style_rounded),
+  GameCatalogEntry(code: 'TIC_TAC_TOE', name: 'Tic-Tac-Toe', tagline: 'Coming soon', tile: AppColors.raised, icon: Icons.tag_rounded),
 ];
 
 List<GameCatalogEntry> get liveGames => gameCatalog.where((e) => e.live).toList();
@@ -75,7 +76,7 @@ class GameArt extends StatelessWidget {
   }
 }
 
-/// Fill the last row when the narrow grid has one card left.
+/// The live games as full-width table cards (two or three across on wide screens).
 class LiveGamesGrid extends StatelessWidget {
   const LiveGamesGrid({super.key});
 
@@ -83,94 +84,65 @@ class LiveGamesGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final games = liveGames;
     return LayoutBuilder(builder: (context, constraints) {
-      final columns = constraints.maxWidth >= 600 ? 3 : 2;
+      final columns = constraints.maxWidth >= 960 ? 3 : (constraints.maxWidth >= 600 ? 2 : 1);
       const gap = 12.0;
       final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
       return Wrap(
         spacing: gap,
         runSpacing: gap,
-        children: [
-          for (final (index, game) in games.indexed)
-            if (columns == 2 && games.length.isOdd && index == games.length - 1)
-              SizedBox(width: constraints.maxWidth, child: LiveGameCard(entry: game, wide: true))
-            else
-              SizedBox(width: width, child: LiveGameCard(entry: game)),
-        ],
+        children: [for (final game in games) SizedBox(width: width, child: LiveGameCard(entry: game))],
       );
     });
   }
 }
 
+/// A live game: its art on the left, name and line, and a Live mark.
 class LiveGameCard extends StatelessWidget {
   const LiveGameCard({super.key, required this.entry, this.wide = false});
   final GameCatalogEntry entry;
+
+  /// Kept for older call sites; every card is a wide row now.
   final bool wide;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final artwork = AspectRatio(
-      aspectRatio: 1.25,
-      child: Stack(fit: StackFit.expand, children: [
-        GameArt(code: entry.code, padding: 14),
-        const Positioned(top: 10, left: 10, child: _LiveBadge()),
-      ]),
-    );
-    final details = Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-        Text(entry.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleSmall),
-        const SizedBox(height: 2),
-        Text(entry.tagline, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
-      ]),
-    );
+    final palette = AppPalette.of(context);
+    final textScale = MediaQuery.textScalerOf(context).scale(16) / 16;
+    final art = 104.0 * textScale.clamp(1, 1.3);
     return Semantics(
       button: true,
       label: 'Play ${entry.name}',
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: () => context.push(entry.route!),
-          child: wide
-              ? LayoutBuilder(builder: (context, constraints) {
-                  final artWidth = constraints.maxWidth * 0.42;
-                  return Stack(children: [
-                    Padding(
-                      padding: EdgeInsets.only(left: artWidth),
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(minHeight: artWidth / 1.25),
-                        child: Row(children: [
-                          Expanded(child: details),
-                          Padding(
-                            padding: const EdgeInsets.only(right: 10),
-                            child: Icon(Icons.chevron_right_rounded, color: theme.colorScheme.onSurfaceVariant),
-                          ),
-                        ]),
-                      ),
-                    ),
-                    Positioned(left: 0, top: 0, bottom: 0, width: artWidth, child: artwork),
-                  ]);
-                })
-              : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [artwork, details]),
-        ),
+      excludeSemantics: true,
+      child: AppPanel(
+        padding: EdgeInsets.zero,
+        onTap: () => context.push(entry.route!),
+        child: Row(children: [
+          SizedBox.square(dimension: art, child: GameArt(code: entry.code, padding: 16)),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                Text(entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppType.display(size: 25, color: theme.colorScheme.onSurface)),
+                const SizedBox(height: 3),
+                Text(entry.tagline, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall?.copyWith(fontSize: 14)),
+                const SizedBox(height: 6),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  LiveDot(size: 7, color: palette.live),
+                  const SizedBox(width: 6),
+                  Text('Live', style: AppType.ui(size: 13, weight: FontWeight.w600, color: palette.live)),
+                ]),
+              ]),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Icon(Icons.chevron_right_rounded, color: theme.colorScheme.onSurfaceVariant),
+          ),
+        ]),
       ),
     );
   }
-}
-
-class _LiveBadge extends StatelessWidget {
-  const _LiveBadge();
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(999)),
-        child: const Row(mainAxisSize: MainAxisSize.min, children: [
-          LiveDot(color: Color(0xFF4ADE80), size: 6),
-          SizedBox(width: 5),
-          Text('Live', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
-        ]),
-      );
 }
 
 /// Upcoming games: small and quiet, in one scrolling row.
@@ -181,7 +153,7 @@ class UpcomingGamesRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final games = upcomingGames;
     return SizedBox(
-      height: 112,
+      height: 104,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: games.length,
@@ -206,14 +178,17 @@ class _UpcomingTile extends StatelessWidget {
           ..hideCurrentSnackBar()
           ..showSnackBar(SnackBar(content: Text('${entry.name} is coming soon.'))),
         child: SizedBox(
-          width: 78,
+          width: 76,
           child: Column(children: [
-            Opacity(
-              opacity: 0.7,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: SizedBox.square(dimension: 72, child: GameArt(code: entry.code)),
+            Container(
+              width: 66,
+              height: 66,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppPalette.of(context).border),
               ),
+              child: Icon(entry.icon, size: 26, color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7)),
             ),
             const SizedBox(height: 6),
             Text(entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.labelSmall),

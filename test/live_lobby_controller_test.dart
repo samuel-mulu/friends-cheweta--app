@@ -141,4 +141,29 @@ void main() {
 
     expect(socket.sent, ['challenge:create']);
   });
+
+  test('lobby chat badge: live messages from others count until the chat is opened', () async {
+    final lobby = container.read(liveLobbyControllerProvider.notifier);
+    await lobby.open('LUDO', stakes: const [_mode], stakeId: 'mode-1');
+    void message(String id, String from) => socket.events$.add(RealtimeEvent(name: 'lobby:chat:message', payload: {
+          'data': {'id': id, 'text': 'hi', 'sender': {'userId': from, 'displayName': from}},
+        }));
+    int unread() => container.read(liveLobbyControllerProvider).chatUnread;
+
+    message('m1', 'other');
+    message('m2', 'me'); // my own message is never unread
+    await flush();
+    expect(unread(), 1);
+
+    lobby.setChatOpen(true);
+    expect(unread(), 0);
+    message('m3', 'other'); // read as it arrives
+    await flush();
+    expect(unread(), 0);
+
+    lobby.setChatOpen(false);
+    message('m4', 'other');
+    await flush();
+    expect(unread(), 1);
+  });
 }

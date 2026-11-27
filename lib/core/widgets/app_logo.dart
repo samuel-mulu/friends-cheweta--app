@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:friends_game_app/core/theme/app_type.dart';
 
 /// Brand colors. Navy + gold carry the brand; the four game colors appear as
 /// accents (tokens, glows) and are shared with the game art.
@@ -8,9 +9,10 @@ abstract final class BrandColors {
   static const green = Color(0xFF1FA35A);
   static const yellow = Color(0xFFF5B800);
   static const blue = Color(0xFF1E88E5);
-  static const navy = Color(0xFF0B1530);
+  static const navy = Color(0xFF0B1120);
+  static const table = Color(0xFF131B2E);
   static const indigo = Color(0xFF1C2C6E);
-  static const gold = Color(0xFFFFC83D);
+  static const gold = Color(0xFFF4B740);
 }
 
 /// The Friends mark: a bold white "F" on a navy tile with a fine gold ring.
@@ -62,25 +64,12 @@ class AppLogoPainter extends CustomPainter {
     final bottom = s * 0.73;
     final middle = s * 0.51;
 
-    // A soft drop shadow under the letter for depth.
-    final shadow = Paint()
-      ..color = Colors.black.withValues(alpha: 0.25)
-      ..strokeWidth = stroke
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, s * 0.02);
-
     // Stem grows upward, then the bars draw out to the right.
     final strokes = [
       (Offset(left, bottom), Offset(left, top), _part(0, 0.35)),
       (Offset(left, top), Offset(s * 0.60, top), _part(0.25, 0.55)),
       (Offset(left, middle), Offset(s * 0.53, middle), _part(0.4, 0.65)),
     ];
-    // All shadows first, then all ink, so the letter reads as one shape.
-    final drop = Offset(0, s * 0.02);
-    for (final (a, b, t) in strokes) {
-      if (t > 0) canvas.drawLine(a + drop, Offset.lerp(a, b, t)! + drop, shadow);
-    }
     for (final (a, b, t) in strokes) {
       if (t > 0) canvas.drawLine(a, Offset.lerp(a, b, t)!, ink);
     }
@@ -92,52 +81,23 @@ class AppLogoPainter extends CustomPainter {
   void _paintTile(Canvas canvas, double s) {
     final rect = Offset.zero & Size.square(s);
     final shape = RRect.fromRectAndRadius(rect, Radius.circular(square ? 0 : s * 0.26));
-    canvas.drawRRect(
-      shape,
-      Paint()
-        ..shader = const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [BrandColors.indigo, BrandColors.navy],
-        ).createShader(rect),
-    );
-    // Light from the top so the tile is not flat.
-    canvas.save();
-    canvas.clipRRect(shape);
-    canvas.drawCircle(
-      Offset(s * 0.2, -s * 0.1),
-      s * 0.9,
-      Paint()
-        ..shader = RadialGradient(colors: [Colors.white.withValues(alpha: 0.14), Colors.transparent])
-            .createShader(Rect.fromCircle(center: Offset(s * 0.2, -s * 0.1), radius: s * 0.9)),
-    );
-    canvas.restore();
-    // Fine gold ring (fades in with the reveal).
+    // Flat table colour, framed by a fine gold ring (fades in with the reveal).
+    canvas.drawRRect(shape, Paint()..color = BrandColors.table);
     final ringInset = s * 0.065;
     canvas.drawRRect(
       RRect.fromRectAndRadius(rect.deflate(ringInset), Radius.circular(square ? s * 0.12 : s * 0.2)),
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = s * 0.016
-        ..color = BrandColors.gold.withValues(alpha: 0.6 * _part(0.3, 1)),
+        ..strokeWidth = s * 0.02
+        ..color = BrandColors.gold.withValues(alpha: 0.85 * _part(0.3, 1)),
     );
   }
 
-  /// A glossy game token that pops in with [t] (elastic scale).
+  /// A flat game token that pops in with [t] (elastic scale).
   void _token(Canvas canvas, Offset center, double radius, Color color, double t) {
     if (t <= 0) return;
     final r = radius * math.max(t, 0);
-    canvas.drawCircle(center + Offset(0, radius * 0.25), r, Paint()..color = Colors.black.withValues(alpha: 0.28));
-    canvas.drawCircle(
-      center,
-      r,
-      Paint()
-        ..shader = RadialGradient(
-          center: const Alignment(-0.35, -0.4),
-          colors: [Color.lerp(color, Colors.white, 0.35)!, color, Color.lerp(color, Colors.black, 0.25)!],
-          stops: const [0, 0.55, 1],
-        ).createShader(Rect.fromCircle(center: center, radius: r)),
-    );
+    canvas.drawCircle(center, r, Paint()..color = color);
     canvas.drawCircle(
       center,
       r,
@@ -152,7 +112,7 @@ class AppLogoPainter extends CustomPainter {
   bool shouldRepaint(covariant AppLogoPainter old) => old.square != square || old.reveal != reveal || old.tile != tile;
 }
 
-/// The wordmark: FRIENDS with the gold GAME HUB line under it.
+/// The wordmark: FRIENDS ጨዋታ ("games"), the Amharic in gold.
 class AppWordmark extends StatelessWidget {
   const AppWordmark({super.key, this.size = 48, this.light = false, this.center = false, this.tracking = 0});
   final double size;
@@ -165,32 +125,18 @@ class AppWordmark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ink = light ? Colors.white : Theme.of(context).colorScheme.onSurface;
-    return Column(
-      crossAxisAlignment: center ? CrossAxisAlignment.center : CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          'FRIENDS',
-          style: TextStyle(
-            color: ink,
-            fontSize: size * 0.46,
-            fontWeight: FontWeight.w900,
-            letterSpacing: size * 0.04 + tracking,
-            height: 1,
-          ),
+    final gold = light || Theme.of(context).brightness == Brightness.dark ? BrandColors.gold : const Color(0xFF8A5A00);
+    return Text.rich(
+      TextSpan(children: [
+        TextSpan(
+          text: 'FRIENDS ',
+          style: AppType.display(size: size * 0.56, color: ink, height: size * 0.56).copyWith(letterSpacing: size * 0.02 + tracking),
         ),
-        SizedBox(height: size * 0.08),
-        Text(
-          'GAME HUB',
-          style: TextStyle(
-            color: light ? BrandColors.gold : const Color(0xFFC98A00),
-            fontSize: size * 0.22,
-            fontWeight: FontWeight.w800,
-            letterSpacing: size * 0.1 + tracking * 0.5,
-            height: 1,
-          ),
-        ),
-      ],
+        TextSpan(text: 'ጨዋታ', style: AppType.amharic(size: size * 0.46, color: gold).copyWith(height: 1)),
+      ]),
+      textAlign: center ? TextAlign.center : TextAlign.start,
+      maxLines: 1,
+      softWrap: false,
     );
   }
 }
@@ -208,7 +154,7 @@ class AppLogo extends StatelessWidget {
     final mark = AppLogoMark(size: size);
     final word = AppWordmark(size: size, light: light, center: vertical);
     return Semantics(
-      label: 'Friends Game Hub',
+      label: 'Friends Chewata',
       child: ExcludeSemantics(
         child: vertical
             ? Column(mainAxisSize: MainAxisSize.min, children: [mark, SizedBox(height: size * 0.25), word])

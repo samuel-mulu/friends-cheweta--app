@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:friends_game_app/core/theme/app_colors.dart';
+import 'package:friends_game_app/core/theme/app_type.dart';
 import 'package:friends_game_app/core/utils/money_formatter.dart';
 
 /// Shared building blocks of the app's screens (not of the game boards).
@@ -17,16 +18,14 @@ class StakePill extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = AppPalette.of(context);
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: large ? 12 : 9, vertical: large ? 6 : 3),
+      padding: EdgeInsets.symmetric(horizontal: large ? 12 : 8, vertical: large ? 5 : 2),
       decoration: BoxDecoration(color: palette.moneyTint, borderRadius: BorderRadius.circular(999)),
-      child: Text(
-        '${prefix == null ? '' : '$prefix '}${MoneyFormatter.compactEtb(amountMinor)}',
-        style: TextStyle(
-          color: palette.money,
-          fontWeight: FontWeight.w700,
-          fontSize: large ? 14 : 12,
-          fontFeatures: const [FontFeature.tabularFigures()],
-        ),
+      child: Text.rich(
+        TextSpan(children: [
+          if (prefix != null) TextSpan(text: '$prefix ', style: AppType.ui(size: large ? 13 : 11.5, weight: FontWeight.w600, color: palette.money)),
+          TextSpan(text: MoneyFormatter.compactEtb(amountMinor)),
+        ]),
+        style: AppType.money(size: large ? 17 : 14.5, color: palette.money),
       ),
     );
   }
@@ -74,39 +73,61 @@ class LiveDot extends StatelessWidget {
       );
 }
 
-/// Initials in a navy-tinted circle; a green ring marks a ready player.
+/// Initials on a flat disc; a green dot marks a ready (or online) player.
 class PlayerAvatar extends StatelessWidget {
-  const PlayerAvatar({super.key, required this.name, this.size = 44, this.ready = false});
+  const PlayerAvatar({super.key, required this.name, this.size = 44, this.ready = false, this.ring = false});
   final String name;
   final double size;
   final bool ready;
+
+  /// A gold ring (me, in the sidebar).
+  final bool ring;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final palette = AppPalette.of(context);
     final initials = name.trim().split(RegExp(r'\s+')).where((part) => part.isNotEmpty).take(2).map((part) => part.characters.first.toUpperCase()).join();
-    return Container(
-      width: size,
-      height: size,
-      padding: EdgeInsets.all(ready ? 2 : 0),
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: ready ? Border.all(color: palette.live, width: 2) : null,
-      ),
-      child: CircleAvatar(
-        backgroundColor: scheme.primaryContainer,
-        child: Text(
-          initials.isEmpty ? '?' : initials,
-          style: TextStyle(color: scheme.onPrimaryContainer, fontWeight: FontWeight.w700, fontSize: size * 0.34),
+    final dot = size * 0.26;
+    return SizedBox.square(
+      dimension: size,
+      child: Stack(clipBehavior: Clip.none, children: [
+        Container(
+          width: size,
+          height: size,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: palette.surfaceAlt,
+            shape: BoxShape.circle,
+            border: ring ? Border.all(color: AppColors.gold, width: 1.5) : null,
+          ),
+          child: Text(
+            initials.isEmpty ? '?' : initials,
+            style: AppType.display(size: size * 0.38, color: scheme.onSurface, height: size * 0.38),
+          ),
         ),
-      ),
+        if (ready)
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: Container(
+              width: dot,
+              height: dot,
+              decoration: BoxDecoration(
+                color: palette.live,
+                shape: BoxShape.circle,
+                border: Border.all(color: palette.background, width: 2),
+              ),
+            ),
+          ),
+      ]),
     );
   }
 }
 
+/// A section title in the condensed display face.
 class SectionHeader extends StatelessWidget {
-  const SectionHeader({super.key, required this.title, this.trailing, this.padding = const EdgeInsets.fromLTRB(0, 8, 0, 12)});
+  const SectionHeader({super.key, required this.title, this.trailing, this.padding = const EdgeInsets.fromLTRB(0, 8, 0, 10)});
   final String title;
   final Widget? trailing;
   final EdgeInsets padding;
@@ -115,10 +136,60 @@ class SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: padding,
         child: Row(children: [
-          Expanded(child: Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700))),
+          Expanded(child: Text(title, style: AppType.display(size: 21, color: Theme.of(context).colorScheme.onSurface))),
           if (trailing != null) trailing!,
         ]),
       );
+}
+
+/// A flat panel: the card surface with a hairline border.
+class AppPanel extends StatelessWidget {
+  const AppPanel({super.key, required this.child, this.padding = const EdgeInsets.all(16), this.onTap, this.radius = 16, this.color});
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final VoidCallback? onTap;
+  final double radius;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(radius),
+      side: BorderSide(color: AppPalette.of(context).border),
+    );
+    return Material(
+      color: color ?? Theme.of(context).colorScheme.surface,
+      shape: shape,
+      clipBehavior: Clip.antiAlias,
+      child: onTap == null ? Padding(padding: padding, child: child) : InkWell(onTap: onTap, child: Padding(padding: padding, child: child)),
+    );
+  }
+}
+
+/// Title row of a sheet: condensed title, optional line under it.
+class SheetHeader extends StatelessWidget {
+  const SheetHeader({super.key, required this.title, this.subtitle, this.trailing});
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Expanded(child: Text(title, style: theme.textTheme.headlineSmall)),
+          if (trailing != null) trailing!,
+        ]),
+        if (subtitle != null) ...[
+          const SizedBox(height: 4),
+          Text(subtitle!, style: theme.textTheme.bodySmall?.copyWith(fontSize: 14, height: 20 / 14)),
+        ],
+      ]),
+    );
+  }
 }
 
 class EmptyState extends StatelessWidget {
@@ -246,20 +317,15 @@ class _CountdownRingState extends State<CountdownRing> {
         SizedBox.expand(
           child: CircularProgressIndicator(
             value: fraction,
-            strokeWidth: 4,
+            strokeWidth: 3.5,
             strokeCap: StrokeCap.round,
             backgroundColor: AppPalette.of(context).surfaceAlt,
-            color: urgent ? scheme.error : scheme.primary,
+            color: urgent ? scheme.error : AppColors.gold,
           ),
         ),
         Text(
           seconds >= 60 ? '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}' : '$seconds',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: widget.size * (seconds >= 60 ? 0.24 : 0.3),
-            color: urgent ? scheme.error : scheme.onSurface,
-            fontFeatures: const [FontFeature.tabularFigures()],
-          ),
+          style: AppType.money(size: widget.size * (seconds >= 60 ? 0.28 : 0.36), color: urgent ? scheme.error : scheme.onSurface),
         ),
       ]),
     );

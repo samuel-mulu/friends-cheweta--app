@@ -47,6 +47,7 @@ const _forwardedServerEvents = <String>[
   'ludo:extra_roll_granted',
   'ludo:player_finished',
   'ludo:player_resigned',
+  'ludo:capture_missed',
   'ludo:auto_played',
   'ludo:strikes',
   'dama:piece_moved',

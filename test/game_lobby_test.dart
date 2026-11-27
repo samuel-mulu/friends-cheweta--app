@@ -95,6 +95,70 @@ void main() {
     expect(state().myStakeId, 's20');
   });
 
+  test('getting ready says my terms (goal, auto-match); a stake change keeps them', () async {
+    final readies = <Map<String, dynamic>>[];
+    socket.reply = (event, payload) {
+      if (event == 'lobby:ready') readies.add(payload);
+      return switch (event) {
+        'lobby:join_game' => snapshot(payload['gameModeId']?.toString() ?? 's10', myState: payload['gameModeId'] == null ? 'READY' : 'ONLINE'),
+        _ => {'ok': true},
+      };
+    };
+    await lobby().open('LUDO', stakes: [_ten, _twenty]);
+    await lobby().ready(tokensToWin: 2, autoMatch: false);
+    expect(readies.last, containsPair('tokensToWin', 2));
+    expect(readies.last, containsPair('autoMatch', false));
+
+    await lobby().changeStake('s20');
+    expect(readies, hasLength(2));
+    expect(readies.last, allOf(containsPair('tokensToWin', 2), containsPair('autoMatch', false)));
+  });
+
+  test('an older server that does not know ready terms still gets me ready (plain)', () async {
+    final readies = <Map<String, dynamic>>[];
+    socket.reply = (event, payload) {
+      if (event == 'lobby:join_game') return snapshot('s10');
+      if (event == 'lobby:ready') {
+        readies.add(payload);
+        if (payload.containsKey('autoMatch')) {
+          return {'ok': false, 'code': 'REQUEST_FAILED', 'message': 'property autoMatch should not exist'};
+        }
+      }
+      return {'ok': true};
+    };
+    await lobby().open('LUDO', stakes: [_ten, _twenty]);
+    await lobby().ready(tokensToWin: 2);
+    expect(readies, hasLength(2));
+    expect(readies.last.keys, ['commandId']);
+    expect(state().error, isNull);
+  });
+
+  test('playing a Ludo player plays the goal they chose', () async {
+    final requests = <Map<String, dynamic>>[];
+    socket.reply = (event, payload) {
+      if (event == 'challenge:create') requests.add(payload);
+      if (event == 'lobby:join_game') {
+        return {
+          'ok': true,
+          'data': {
+            'gameModeId': 's10',
+            'myState': 'ONLINE',
+            'players': <Map<String, dynamic>>[
+              {'userId': 'me', 'displayName': 'Me', 'state': 'ONLINE', 'gameModeId': 's10'},
+              {'userId': 'abel', 'displayName': 'Abel', 'state': 'READY', 'gameModeId': 's10', 'tokensToWin': 1},
+            ],
+          },
+        };
+      }
+      return {'ok': true};
+    };
+    await lobby().open('LUDO', stakes: [_ten, _twenty]);
+    final abel = state().visiblePlayers.firstWhere((p) => p.userId == 'abel');
+    expect(abel.tokensToWin, 1);
+    await lobby().challenge(abel, tokensToWin: 4);
+    expect(requests.single, containsPair('tokensToWin', 1));
+  });
+
   test('changing my stake while ready keeps me ready', () async {
     socket.reply = (event, payload) => switch (event) {
           'lobby:join_game' => snapshot(payload['gameModeId']?.toString() ?? 's10', myState: payload['gameModeId'] == null ? 'READY' : 'ONLINE'),

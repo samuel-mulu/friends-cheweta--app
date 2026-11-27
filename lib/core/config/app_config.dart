@@ -19,8 +19,11 @@ class AppConfig {
   static AppConfig get current {
     final envApiBaseUrl = dotenv.maybeGet('API_BASE_URL') ?? '';
     final envSocketBaseUrl = dotenv.maybeGet('SOCKET_BASE_URL') ?? '';
-    final apiBaseUrl = _apiBaseUrlEnv.isNotEmpty ? _apiBaseUrlEnv : envApiBaseUrl;
-    final socketBaseUrl = _socketBaseUrlEnv.isNotEmpty ? _socketBaseUrlEnv : envSocketBaseUrl;
+    // Trailing slashes are dropped: paths are appended as '/game', '/auth/…', so
+    // "https://host//" would otherwise become "https://host///game" (a socket
+    // namespace that does not exist: the app never connects).
+    final apiBaseUrl = _trimSlashes(_apiBaseUrlEnv.isNotEmpty ? _apiBaseUrlEnv : envApiBaseUrl);
+    final socketBaseUrl = _trimSlashes(_socketBaseUrlEnv.isNotEmpty ? _socketBaseUrlEnv : envSocketBaseUrl);
 
     if (apiBaseUrl.isNotEmpty && socketBaseUrl.isNotEmpty) {
       return AppConfig(
@@ -37,6 +40,8 @@ class AppConfig {
       socketBaseUrl: 'http://$host:5000',
     );
   }
+
+  static String _trimSlashes(String url) => url.trim().replaceFirst(RegExp(r'/+$'), '');
 
   static String _localDevHost() {
     if (kIsWeb) return '127.0.0.1';

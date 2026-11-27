@@ -1,47 +1,67 @@
 import 'package:flutter/material.dart';
 
-/// Brand palette, taken from the Friends logo (navy tile, gold ring).
+/// Friends ጨዋታ palette: a card table at night.
 ///
-/// Roles, so colour always means the same thing:
-/// - navy: the brand and every primary action;
-/// - gold: money and winning only (balances, stakes, prizes, "1st");
-/// - green: live and ready only;
-/// - red: errors and destructive actions.
+/// Flat dark surfaces with hairline borders; one gold for the main action and
+/// for money; green only for live/ready; red only for errors and destructive
+/// actions. Game colours live on the game art, never on the chrome.
 abstract final class AppColors {
-  // Brand.
-  static const navy = Color(0xFF0B1530);
-  static const navyRaised = Color(0xFF15224A);
-  static const indigo = Color(0xFF1C2C6E);
-  static const gold = Color(0xFFFFC83D);
+  // The table (dark, the default).
+  static const night = Color(0xFF0B1120);
+  static const table = Color(0xFF131B2E);
+  static const raised = Color(0xFF1B2540);
+  static const line = Color(0xFF2A3655);
+  static const ink = Color(0xFFEEF1F8);
+  static const inkSoft = Color(0xFFC8D0E4);
+  static const muted = Color(0xFF93A0BE);
+  static const faint = Color(0xFF5F6C8C);
+
+  // Gold: chips, money and the one main action per screen.
+  static const gold = Color(0xFFF4B740);
+
+  /// Text and icons on a gold fill.
+  static const onGold = Color(0xFF1A1205);
 
   /// Gold that stays readable as text on a light surface.
-  static const goldInk = Color(0xFF9A6A00);
-  static const goldTint = Color(0xFFFFF4D6);
+  static const goldInk = Color(0xFF8A5A00);
 
-  static const live = Color(0xFF1C9A5B);
+  /// Selected gold tint on the dark table.
+  static const goldWash = Color(0xFF2A2312);
+  static const goldTint = Color(0xFFFFF1D2);
+
+  static const live = Color(0xFF2BB673);
+  static const liveSoft = Color(0xFF4FD394);
   static const liveTint = Color(0xFFE2F5EA);
-  static const danger = Color(0xFFC63C3C);
+  static const liveWash = Color(0xFF12291F);
+  static const danger = Color(0xFFE5484D);
+  static const dangerSoft = Color(0xFFFF7A7E);
 
-  // Light.
-  static const lightBackground = Color(0xFFF4F6FA);
+  /// Behind sheets and the drawer.
+  static const scrim = Color(0xB805080F);
+
+  // Light (optional; the table stays the brand).
+  static const lightBackground = Color(0xFFF2F4F8);
   static const lightSurface = Color(0xFFFFFFFF);
-  static const lightSurfaceAlt = Color(0xFFEDF0F6);
-  static const lightText = Color(0xFF0B1530);
-  static const lightMuted = Color(0xFF5B6580);
-  static const lightBorder = Color(0xFFE0E5EE);
+  static const lightSurfaceAlt = Color(0xFFE9EDF4);
+  static const lightText = Color(0xFF0B1120);
+  static const lightMuted = Color(0xFF55627F);
+  static const lightBorder = Color(0xFFD9DFEA);
 
-  // Dark: the same navy family, lifted.
-  static const darkBackground = Color(0xFF070E21);
-  static const darkSurface = Color(0xFF0F1A33);
-  static const darkSurfaceAlt = Color(0xFF172443);
-  static const darkText = Color(0xFFEEF2F8);
-  static const darkMuted = Color(0xFF97A2BB);
-  static const darkBorder = Color(0xFF223156);
-  static const darkPrimary = Color(0xFFDCE4F7);
+  // Dark aliases (older call sites).
+  static const darkBackground = night;
+  static const darkSurface = table;
+  static const darkSurfaceAlt = raised;
+  static const darkText = ink;
+  static const darkMuted = muted;
+  static const darkBorder = line;
 
-  /// @deprecated names kept for older call sites.
-  static const brand = navy;
-  static const brandDark = darkPrimary;
+  /// @deprecated brand names kept for older call sites.
+  static const navy = night;
+  static const navyRaised = raised;
+  static const indigo = Color(0xFF1C2C6E);
+  static const darkPrimary = gold;
+  static const brand = night;
+  static const brandDark = gold;
 }
 
 /// Colours that depend on light/dark, for widgets outside the Material scheme.
@@ -54,6 +74,8 @@ class AppPalette extends ThemeExtension<AppPalette> {
     required this.moneyTint,
     required this.live,
     required this.liveTint,
+    required this.background,
+    required this.selected,
   });
 
   /// Second surface level: chips, inset panels, skeletons.
@@ -66,28 +88,47 @@ class AppPalette extends ThemeExtension<AppPalette> {
   final Color live;
   final Color liveTint;
 
+  /// The page behind cards (insets on a card use it too).
+  final Color background;
+
+  /// Fill of a selected chip or card (with a gold border).
+  final Color selected;
+
   static const light = AppPalette(
     surfaceAlt: AppColors.lightSurfaceAlt,
     border: AppColors.lightBorder,
     money: AppColors.goldInk,
     moneyTint: AppColors.goldTint,
-    live: AppColors.live,
+    live: Color(0xFF16885A),
     liveTint: AppColors.liveTint,
+    background: AppColors.lightBackground,
+    selected: AppColors.goldTint,
   );
 
   static const dark = AppPalette(
-    surfaceAlt: AppColors.darkSurfaceAlt,
-    border: AppColors.darkBorder,
+    surfaceAlt: AppColors.raised,
+    border: AppColors.line,
     money: AppColors.gold,
-    moneyTint: Color(0xFF2E2710),
-    live: Color(0xFF3CC47E),
-    liveTint: Color(0xFF12301F),
+    moneyTint: AppColors.goldWash,
+    live: AppColors.liveSoft,
+    liveTint: AppColors.liveWash,
+    background: AppColors.night,
+    selected: AppColors.goldWash,
   );
 
-  static AppPalette of(BuildContext context) => Theme.of(context).extension<AppPalette>() ?? light;
+  static AppPalette of(BuildContext context) => Theme.of(context).extension<AppPalette>() ?? dark;
 
   @override
-  AppPalette copyWith({Color? surfaceAlt, Color? border, Color? money, Color? moneyTint, Color? live, Color? liveTint}) =>
+  AppPalette copyWith({
+    Color? surfaceAlt,
+    Color? border,
+    Color? money,
+    Color? moneyTint,
+    Color? live,
+    Color? liveTint,
+    Color? background,
+    Color? selected,
+  }) =>
       AppPalette(
         surfaceAlt: surfaceAlt ?? this.surfaceAlt,
         border: border ?? this.border,
@@ -95,6 +136,8 @@ class AppPalette extends ThemeExtension<AppPalette> {
         moneyTint: moneyTint ?? this.moneyTint,
         live: live ?? this.live,
         liveTint: liveTint ?? this.liveTint,
+        background: background ?? this.background,
+        selected: selected ?? this.selected,
       );
 
   @override
@@ -107,6 +150,8 @@ class AppPalette extends ThemeExtension<AppPalette> {
       moneyTint: Color.lerp(moneyTint, other.moneyTint, t)!,
       live: Color.lerp(live, other.live, t)!,
       liveTint: Color.lerp(liveTint, other.liveTint, t)!,
+      background: Color.lerp(background, other.background, t)!,
+      selected: Color.lerp(selected, other.selected, t)!,
     );
   }
 }

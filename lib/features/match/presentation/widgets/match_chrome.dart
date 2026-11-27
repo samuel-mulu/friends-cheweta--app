@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:friends_game_app/core/socket/game_socket_service.dart';
+import 'package:friends_game_app/core/theme/app_colors.dart';
+import 'package:friends_game_app/core/theme/app_type.dart';
 
 /// Top bar, connection strip and inline error of the match screen.
 class MatchTopBar extends StatelessWidget {
@@ -13,7 +15,11 @@ class MatchTopBar extends StatelessWidget {
     required this.onReact,
     required this.onToggleSound,
     required this.onMenu,
+    this.badge,
   });
+
+  /// Shown between Exit and the actions (e.g. the game type).
+  final Widget? badge;
 
   final int unread;
   final bool soundOn;
@@ -26,15 +32,21 @@ class MatchTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Dark translucent pills, so they sit on any table (navy, wood, felt).
     Widget pill({required Widget child, VoidCallback? onTap, String? tooltip}) => Tooltip(
           message: tooltip ?? '',
           child: Material(
-            color: Colors.white.withValues(alpha: 0.1),
-            shape: StadiumBorder(side: BorderSide(color: Colors.white.withValues(alpha: 0.18))),
+            color: Colors.black.withValues(alpha: 0.32),
+            shape: StadiumBorder(side: BorderSide(color: Colors.white.withValues(alpha: 0.14))),
             child: InkWell(
               customBorder: const StadiumBorder(),
               onTap: onTap,
-              child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7), child: child),
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 40, minWidth: 44),
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: child,
+              ),
             ),
           ),
         );
@@ -45,12 +57,25 @@ class MatchTopBar extends StatelessWidget {
         pill(
           onTap: onExit,
           tooltip: 'Exit match',
-          child: const Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.chevron_left_rounded, size: 18, color: Color(0xFFFF7A7A)),
-            Text('Exit', style: TextStyle(color: Color(0xFFFF7A7A), fontWeight: FontWeight.w700)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.chevron_left_rounded, size: 18, color: AppColors.dangerSoft),
+            Text('Exit', style: AppType.ui(size: 14.5, weight: FontWeight.w700, color: AppColors.dangerSoft)),
           ]),
         ),
-        const Spacer(),
+        // The badge takes the free middle, and only when it fits (small phones
+        // keep every button; the type is also in the menu's rules).
+        Expanded(
+          child: badge == null
+              ? const SizedBox.shrink()
+              : LayoutBuilder(
+                  builder: (context, box) => box.maxWidth < 88
+                      ? const SizedBox.shrink()
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: badge)),
+                        ),
+                ),
+        ),
         pill(
           onTap: onToggleSound,
           tooltip: soundOn ? 'Mute sounds' : 'Unmute sounds',
@@ -98,15 +123,14 @@ class MatchConnectionBanner extends StatelessWidget {
         : status == GameSocketStatus.connecting || status == GameSocketStatus.recovering
             ? 'Reconnecting…'
             : 'Connection lost — board preserved';
-    final scheme = Theme.of(context).colorScheme;
     return Material(
-      color: scheme.secondaryContainer.withValues(alpha: 0.85),
+      color: AppColors.raised,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         child: Row(children: [
-          SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: scheme.onSecondaryContainer)),
+          const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.gold)),
           const SizedBox(width: 8),
-          Expanded(child: Text(text, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSecondaryContainer))),
+          Expanded(child: Text(text, style: AppType.ui(size: 13, weight: FontWeight.w600, color: AppColors.ink))),
         ]),
       ),
     );

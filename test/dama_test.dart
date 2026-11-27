@@ -262,13 +262,21 @@ void main() {
     expect(find.text('CAPTURE!'), findsOneWidget);
     expect(find.text('Capture is compulsory.'), findsOneWidget);
 
-    // The only capturing piece is pre-selected: tapping the landing square plays it.
+    // No move hints: nothing is pre-selected, so a landing square alone does nothing.
     final board = find.byType(DamaBoard);
     final rect = tester.getRect(board);
     final geometry = DamaBoardGeometry(size: rect.width, flipped: false);
     await tester.tapAt(rect.topLeft + geometry.center(sq('e5')));
     await tester.pump();
+    expect(sentMove, isNull);
+
+    // The player picks the piece, then where it goes.
+    await tester.tapAt(rect.topLeft + geometry.center(sq('c3')));
+    await tester.pump();
+    await tester.tapAt(rect.topLeft + geometry.center(sq('e5')));
+    await tester.pump();
     expect(sentMove?['path'], [sq('c3'), sq('e5')]);
+    await tester.pump(const Duration(seconds: 2)); // let the tap nudge expire
   });
 }
 

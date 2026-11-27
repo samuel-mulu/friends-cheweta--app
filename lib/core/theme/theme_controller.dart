@@ -8,10 +8,11 @@ class ThemeController extends Notifier<ThemeMode> {
   @override
   ThemeMode build() {
     final value = ref.read(preferencesStorageProvider).getString(_key);
+    // The table is the brand: dark unless the player picked otherwise.
     return switch (value) {
       'light' => ThemeMode.light,
-      'dark' => ThemeMode.dark,
-      _ => ThemeMode.system,
+      'system' => ThemeMode.system,
+      _ => ThemeMode.dark,
     };
   }
 

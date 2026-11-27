@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:friends_game_app/core/theme/app_colors.dart';
 import 'package:friends_game_app/core/theme/app_spacing.dart';
+import 'package:friends_game_app/core/theme/app_type.dart';
 import 'package:friends_game_app/core/utils/money_formatter.dart';
 import 'package:friends_game_app/core/widgets/app_error_view.dart';
+import 'package:friends_game_app/core/widgets/ui.dart';
 import 'package:friends_game_app/features/auth/presentation/controllers/auth_controller.dart';
 import 'package:friends_game_app/features/history/domain/match_history.dart';
 import 'package:friends_game_app/features/history/presentation/controllers/match_history_controller.dart';
@@ -17,22 +20,29 @@ class HistoryScreen extends ConsumerWidget {
     final state = ref.watch(matchHistoryControllerProvider);
     final me = ref.watch(authControllerProvider).user?.id;
     return RefreshIndicator(
+      color: AppColors.gold,
       onRefresh: () => ref.read(matchHistoryControllerProvider.notifier).load(),
       child: CustomScrollView(
         slivers: [
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(AppSpacing.screen, 24, AppSpacing.screen, 12),
-            sliver: SliverToBoxAdapter(child: Text('Match history', style: Theme.of(context).textTheme.headlineSmall)),
-          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
           if (state.loading && state.items.isEmpty)
             const SliverFillRemaining(child: Center(child: CircularProgressIndicator()))
           else if (state.error != null && state.items.isEmpty)
             SliverFillRemaining(child: AppErrorView(message: state.error!, onRetry: () => ref.read(matchHistoryControllerProvider.notifier).load()))
           else if (state.items.isEmpty)
-            const SliverFillRemaining(hasScrollBody: false, child: Center(child: Text('Your completed and active matches will appear here.')))
+            const SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(
+                child: EmptyState(
+                  icon: Icons.history_rounded,
+                  title: 'No matches yet',
+                  message: 'Your completed and active matches will appear here.',
+                ),
+              ),
+            )
           else
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(AppSpacing.screen, 0, AppSpacing.screen, 28),
+              padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, 28),
               sliver: SliverList.separated(
                 itemCount: state.items.length + (state.nextCursor != null ? 1 : 0),
                 separatorBuilder: (_, __) => const SizedBox(height: 10),
@@ -72,34 +82,46 @@ class _MatchCard extends StatelessWidget {
       }
     }
     final settled = match.settlement != null;
-    final subtitle = match.status == 'FINISHED' ? (won ? 'Won${settled ? ' · Settled' : ''}' : 'Finished') : _prettyStatus(match.status);
+    final practice = match.isPractice;
+    final subtitle = match.status == 'FINISHED'
+        ? (won ? 'Won${settled && !practice ? ', settled' : ''}' : 'Finished')
+        : _prettyStatus(match.status);
+    // Practice is free: name it as such, never with the stake of the mode it borrowed.
+    final title = practice ? '${match.gameName} practice' : (match.modeName.isEmpty ? match.gameName : match.modeName);
 
-    return Card(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => context.push('/history/${match.id}'),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(children: [
-            CircleAvatar(child: Icon(won ? Icons.emoji_events_rounded : Icons.sports_esports_rounded)),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(match.modeName.isEmpty ? match.gameName : match.modeName, style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 3),
-                Text(opponent == null ? subtitle : '$subtitle · vs ${opponent.fullName}', style: Theme.of(context).textTheme.bodySmall),
-                const SizedBox(height: 5),
-                Text(DateFormat('MMM d, y · h:mm a').format(match.createdAt.toLocal()), style: Theme.of(context).textTheme.bodySmall),
-              ]),
-            ),
-            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text(MoneyFormatter.minorToEtb(BigInt.from(match.stakeAmountMinor)), style: Theme.of(context).textTheme.labelLarge),
-              const SizedBox(height: 4),
-              const Icon(Icons.chevron_right_rounded, size: 20),
-            ]),
+    final theme = Theme.of(context);
+    final palette = AppPalette.of(context);
+    return AppPanel(
+      padding: const EdgeInsets.all(14),
+      onTap: () => context.push('/history/${match.id}'),
+      child: Row(children: [
+        // Winning is gold; everything else stays quiet.
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(color: won ? palette.selected : palette.surfaceAlt, borderRadius: BorderRadius.circular(12)),
+          child: Icon(
+            won ? Icons.emoji_events_rounded : Icons.sports_esports_outlined,
+            color: won ? AppColors.gold : theme.colorScheme.onSurfaceVariant,
+            size: 22,
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium),
+            const SizedBox(height: 2),
+            Text(opponent == null ? subtitle : '$subtitle, vs ${opponent.fullName}', maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
+            const SizedBox(height: 2),
+            Text(DateFormat('d MMM y, HH:mm').format(match.createdAt.toLocal()), style: theme.textTheme.bodySmall),
           ]),
         ),
-      ),
+        const SizedBox(width: 8),
+        practice
+            ? Text('Free', style: AppType.ui(size: 14, weight: FontWeight.w700, color: theme.colorScheme.onSurfaceVariant))
+            : Text(MoneyFormatter.compactEtb(match.stakeAmountMinor), style: AppType.money(size: 17, color: palette.money)),
+        Icon(Icons.chevron_right_rounded, size: 20, color: theme.colorScheme.onSurfaceVariant),
+      ]),
     );
   }
 

@@ -109,7 +109,9 @@ class MatchPresenter {
                 ? LudoDiceVisualState.waiting
                 : LudoDiceVisualState.disabled;
 
-    final status = resigned
+    final status = snapshot.missedCapturePlayerIds.contains(userId)
+        ? 'Missed a capture'
+        : resigned
         ? 'Left'
         : rankIndex >= 0
             ? (rankIndex == 0 ? 'Winner' : 'Finished')
@@ -222,7 +224,8 @@ class MatchPresenter {
             tokenId: preview.tokenId,
             color: color,
             toProgress: preview.toProgress,
-            captures: preview.captures.isNotEmpty,
+            // "Forget to send back and you lose": spotting the capture is the player's job.
+            captures: preview.captures.isNotEmpty && !authoritative.hidesCaptureHints,
             safe: preview.safe,
             onTap: () => onMove(preview.tokenId),
           ),
@@ -275,6 +278,13 @@ class MatchPresenter {
   /// Standing hint under the board (empty while animations play).
   String get hint {
     if (timeline.isCatchingUp) return 'Catching up…';
+    // Why the match ended, when someone skipped a possible capture.
+    if (game.phase == LudoMatchPhase.finished && snapshot.missedCapturePlayerIds.isNotEmpty) {
+      final missed = snapshot.missedCapturePlayerIds.first;
+      if (missed == me) return 'You could send a token home but moved another: the match is lost.';
+      final who = participants.where((p) => p.userId == missed).firstOrNull?.displayLabel() ?? 'Your opponent';
+      return '$who could send a token home but moved another: they lose.';
+    }
     if (timeline.blocking || !drained || game.currentPlayerId != me || game.phase != LudoMatchPhase.playing) return '';
     return game.turnPhase == LudoTurnPhase.waitingForMove ? 'Tap a glowing token to move' : 'Tap your dice to roll';
   }

@@ -22,7 +22,7 @@ class MessagesButton extends ConsumerWidget {
       icon: Badge(
         isLabelVisible: unread > 0,
         label: Text(unread > 99 ? '99+' : '$unread'),
-        child: const Icon(Icons.markunread_outlined),
+        child: const Icon(Icons.chat_bubble_outline_rounded),
       ),
     );
   }
