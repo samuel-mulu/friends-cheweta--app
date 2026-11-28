@@ -19,6 +19,7 @@ import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/game_hub/presentation/controllers/game_hub_controller.dart';
 import 'package:friends_game_app/features/game_hub/presentation/widgets/game_grid.dart';
+import 'package:friends_game_app/features/karta/domain/karta_table.dart';
 import 'package:friends_game_app/features/karta/presentation/screens/karta_match_screen.dart';
 import 'package:friends_game_app/features/live_lobby/domain/lobby_player.dart';
 import 'package:friends_game_app/features/live_lobby/presentation/controllers/live_lobby_controller.dart';
@@ -120,6 +121,11 @@ class _GameLobbyScreenState extends ConsumerState<GameLobbyScreen> {
       final matchId = next.acceptedMatchId;
       if (matchId != null && matchId.isNotEmpty && previous?.acceptedMatchId != matchId) {
         context.go(GameRoutes.match(next.acceptedGameCode ?? widget.gameCode, matchId));
+      }
+      // Seated at a Karta table (joined, or "I'm ready" found a seat).
+      if (next.activeTableId != null && previous?.activeTableId != next.activeTableId) {
+        _lobby.clearActiveTable();
+        context.go(GameRoutes.kartaTable);
       }
       final error = next.error;
       if (error != null && error != previous?.error && next.myStakeId != null) {
@@ -238,6 +244,7 @@ class _GameLobbyScreenState extends ConsumerState<GameLobbyScreen> {
                       loading: loading,
                       loadError: lobbyError,
                       onPlay: (player) => _play(context, player),
+                      onJoinTable: (table) => _joinTable(context, table),
                       onRefresh: _reloadLobby,
                     ),
             ),
@@ -296,6 +303,22 @@ class _GameLobbyScreenState extends ConsumerState<GameLobbyScreen> {
     }
     HapticFeedback.selectionClick();
     await _lobby.challenge(player, tokensToWin: theirGoal);
+  }
+
+  /// Sit at a Karta table (back of its queue); the screen then opens it.
+  Future<void> _joinTable(BuildContext context, KartaTable table) async {
+    final balance = ref.read(walletControllerProvider).wallet?.availableBalance;
+    if (balance != null && balance < BigInt.from(table.stakeMinor)) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text('You need ${MoneyFormatter.compactEtb(table.stakeMinor)} for a round at this table.'),
+          action: SnackBarAction(label: 'Add funds', onPressed: () => context.push('/deposit')),
+        ));
+      return;
+    }
+    HapticFeedback.selectionClick();
+    await _lobby.joinTable(table.id);
   }
 
   /// Any amount: the stake appears in the lobby for everyone while I sit at it.
@@ -430,6 +453,7 @@ class _PlayersPane extends StatelessWidget {
     required this.loading,
     required this.loadError,
     required this.onPlay,
+    required this.onJoinTable,
     required this.onRefresh,
   });
 
@@ -438,6 +462,7 @@ class _PlayersPane extends StatelessWidget {
   final bool loading;
   final String? loadError;
   final ValueChanged<LobbyPlayer> onPlay;
+  final ValueChanged<KartaTable> onJoinTable;
   final Future<void> Function() onRefresh;
 
   @override
@@ -468,6 +493,27 @@ class _PlayersPane extends StatelessWidget {
             ),
           )
         else ...[
+          // Karta tables with a free seat at my stake: join mid-game.
+          if (state.tablesHere.isNotEmpty) ...[
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+              sliver: SliverToBoxAdapter(
+                child: SectionHeader(
+                  title: 'Open tables',
+                  trailing: StatusPill(label: '${state.tablesHere.length}', tone: StatusTone.live, dot: true),
+                ),
+              ),
+            ),
+            SliverList.builder(
+              itemCount: state.tablesHere.length,
+              itemBuilder: (_, i) => _TableRow(
+                table: state.tablesHere[i],
+                enabled: !state.busy && !state.isChallenged,
+                onJoin: () => onJoinTable(state.tablesHere[i]),
+              ),
+            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 12)),
+          ],
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
             sliver: SliverToBoxAdapter(
@@ -485,7 +531,11 @@ class _PlayersPane extends StatelessWidget {
                     ? 'No one is ready yet'
                     : 'No one is ready at ${_typeOf(state, filtered) == null ? '' : '${_typeOf(state, filtered)!.name} · '}'
                         '${MoneyFormatter.compactEtb(filtered.stakeAmountMinor)}',
-                message: state.isReady ? "You're ready. Players who join will see you at the top." : 'Tap "I\'m ready" below so others can play you.',
+                message: state.isReady
+                    ? "You're ready. Players who join will see you at the top."
+                    : state.myStake?.isMultiplayer == true
+                        ? 'Tap "I\'m ready" below: the table starts when enough players are ready.'
+                        : 'Tap "I\'m ready" below so others can play you.',
               ),
             )
           else
@@ -590,7 +640,7 @@ class _StakeFilter extends ConsumerWidget {
         child: Row(children: [
           // "All" shows everyone (both Dama types); the amounts are those of my type.
           chip('All stakes', state.readyCount, state.filterStakeId == null, () => controller.setFilter(null), amount: false),
-          for (final stake in _typed(state) && state.myRules != null ? state.stakesOfRules(state.myRules!) : state.visibleStakes)
+          for (final stake in state.stakesOf(rules: _typed(state) ? state.myRules : null, players: state.myPlayers))
             chip(
               MoneyFormatter.compactEtb(stake.stakeAmountMinor),
               state.readyCountAt(stake.id),
@@ -641,7 +691,8 @@ class _PlayerRow extends StatelessWidget {
       icon: Icon(Icons.chat_bubble_outline_rounded, size: 20, color: theme.colorScheme.onSurfaceVariant),
     );
     // Outlined gold: the screen's one filled gold button is "I'm ready".
-    final playButton = player.isReady
+    // 3–4 player stakes and Karta tables fill by themselves: no 1v1 requests.
+    final playButton = player.isReady && !(stake?.isMultiplayer ?? false)
         ? OutlinedButton(
             style: OutlinedButton.styleFrom(
               minimumSize: const Size(72, 40),
@@ -678,6 +729,7 @@ class _PlayerRow extends StatelessWidget {
                   if (type != null) VariantTag(variant: type!, emphasized: myType != null && type != myType),
                   // Ludo: the goal they play (first to N home).
                   if (player.tokensToWin != null) GoalCrowns(goal: player.tokensToWin!),
+                  if (stake != null && stake!.playerCount > 2) PlayersTag(count: stake!.playerCount, table: stake!.isKartaTable),
                   if (showStake && stake != null)
                     Text(MoneyFormatter.compactEtb(stake!.stakeAmountMinor), style: AppType.money(size: 16, color: palette.money)),
                   Text(status, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
@@ -825,11 +877,13 @@ class _ReadyChoices extends ConsumerWidget {
     final locked = state.busy || state.isRecovering;
     final typed = _typed(state);
 
-    // Catalog stakes of my type, plus the custom amount I sit at.
+    // Catalog stakes of my type and table size, plus the custom amount I sit at.
     final stakes = [
-      for (final mode in typed && state.myRules != null ? state.stakesOfRules(state.myRules!) : state.visibleStakes)
+      for (final mode in state.stakesOf(rules: typed ? state.myRules : null, players: state.myPlayers))
         if (!mode.custom || mode.id == state.myStakeId) mode,
     ];
+    final sizes = state.offeredPlayerCounts;
+    final multiplayer = stake?.isMultiplayer ?? false;
 
     // Full width in the panel; sized to its label on the folded line.
     final ButtonStyle? actionStyle =
@@ -863,8 +917,9 @@ class _ReadyChoices extends ConsumerWidget {
         Expanded(
           child: Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
             if (variant != null) VariantTag(variant: variant),
+            if (stake != null && stake.playerCount > 2) PlayersTag(count: stake.playerCount, table: stake.isKartaTable),
             if (isLudo) GoalCrowns(goal: prefs.tokensToWin),
-            if (prefs.autoMatch) Icon(Icons.bolt_rounded, size: 16, color: theme.colorScheme.primary, semanticLabel: 'Auto-match on'),
+            if (prefs.autoMatch && !multiplayer) Icon(Icons.bolt_rounded, size: 16, color: theme.colorScheme.primary, semanticLabel: 'Auto-match on'),
           ]),
         ),
         const SizedBox(width: 10),
@@ -884,6 +939,17 @@ class _ReadyChoices extends ConsumerWidget {
         ),
         const SizedBox(height: 10),
       ],
+      if (sizes.length > 1) ...[
+        PlayerCountChips(
+          counts: sizes,
+          selected: state.myPlayers,
+          seats: stake?.isKartaTable ?? false,
+          readyCounts: {for (final size in sizes) size: state.readyCountOfPlayers(size)},
+          enabled: !locked,
+          onChanged: controller.switchPlayers,
+        ),
+        const SizedBox(height: 10),
+      ],
       if (isLudo) ...[
         GoalChips(selected: prefs.tokensToWin, enabled: !locked, onChanged: preferences.setTokensToWin),
         const SizedBox(height: 10),
@@ -898,8 +964,11 @@ class _ReadyChoices extends ConsumerWidget {
         onOther: onOtherAmount,
       ),
       const SizedBox(height: 6),
-      _AutoMatchSwitch(value: prefs.autoMatch, enabled: !locked, onChanged: preferences.setAutoMatch),
-      const SizedBox(height: 6),
+      // A 3–4 player stake or a Karta table always fills by itself.
+      if (!multiplayer) ...[
+        _AutoMatchSwitch(value: prefs.autoMatch, enabled: !locked, onChanged: preferences.setAutoMatch),
+        const SizedBox(height: 6),
+      ],
       action,
       if (stake != null) ...[
         const SizedBox(height: 8),
@@ -909,7 +978,7 @@ class _ReadyChoices extends ConsumerWidget {
             Expanded(
               child: Text.rich(
                 TextSpan(children: [
-                  const TextSpan(text: 'Winner gets '),
+                  TextSpan(text: stake.isKartaTable ? 'Each round, the winner gets ' : 'Winner gets '),
                   TextSpan(text: MoneyFormatter.compactEtb(stake.estimatedWinnerPayoutMinor), style: AppType.money(size: 15, color: palette.money)),
                 ]),
                 maxLines: 1,
@@ -978,11 +1047,17 @@ class _WaitingBar extends ConsumerWidget {
     final bool autoMatch = me?.autoMatch ?? prefs.autoMatch;
     final int? goal = state.gameCode == GameCodes.ludo ? (me?.tokensToWin ?? prefs.tokensToWin) : null;
     final variant = _typeOf(state, stake);
+    final seats = stake?.isAutoTable == true ? stake!.playerCount : null;
+    final fill = state.tableFill(tokensToWin: goal);
     final title = state.isChallenged
         ? 'A request is open…'
-        : autoMatch
-            ? 'Looking for a player…'
-            : 'Waiting for someone to play you';
+        : seats != null
+            ? 'Waiting for players $fill/$seats'
+            : stake?.isKartaTable == true
+                ? 'Looking for a table…'
+                : autoMatch
+                    ? 'Looking for a player…'
+                    : 'Waiting for someone to play you';
     return Semantics(
       container: true,
       liveRegion: true,
@@ -996,10 +1071,12 @@ class _WaitingBar extends ConsumerWidget {
             if (!folded) const SizedBox(height: 4),
             if (!folded)
               Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                if (seats != null) _SeatDots(filled: fill, seats: seats),
                 if (variant != null) VariantTag(variant: variant),
                 if (goal != null) GoalCrowns(goal: goal),
                 if (stake != null) Text(MoneyFormatter.compactEtb(stake.stakeAmountMinor), style: AppType.money(size: 16, color: palette.money)),
-                if (autoMatch) Icon(Icons.bolt_rounded, size: 16, color: theme.colorScheme.primary, semanticLabel: 'Auto-match on'),
+                if (autoMatch && !(stake?.isMultiplayer ?? false))
+                  Icon(Icons.bolt_rounded, size: 16, color: theme.colorScheme.primary, semanticLabel: 'Auto-match on'),
               ]),
           ]),
         ),
@@ -1012,6 +1089,87 @@ class _WaitingBar extends ConsumerWidget {
             label: const Text('Edit'),
           ),
       ]),
+    );
+  }
+}
+
+/// A 3–4 player table filling up: one dot per seat, filled when taken.
+class _SeatDots extends StatelessWidget {
+  const _SeatDots({required this.filled, required this.seats});
+  final int filled;
+  final int seats;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Semantics(
+      label: '$filled of $seats players ready',
+      excludeSemantics: true,
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        for (var i = 0; i < seats; i++)
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: Icon(
+              i < filled ? Icons.person_rounded : Icons.person_outline_rounded,
+              size: 16,
+              color: i < filled ? palette.live : palette.border,
+            ),
+          ),
+      ]),
+    );
+  }
+}
+
+/// A Karta table with a free seat: who sits there, its stake, and Join.
+class _TableRow extends StatelessWidget {
+  const _TableRow({required this.table, required this.enabled, required this.onJoin});
+  final KartaTable table;
+  final bool enabled;
+  final VoidCallback onJoin;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final palette = AppPalette.of(context);
+    final names = table.players.map((p) => p.fullName.split(' ').first).join(', ');
+    return Semantics(
+      label: 'Table, ${table.seated} of ${table.maxSeats} seats, ${MoneyFormatter.compactEtb(table.stakeMinor)} a round, $names',
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(border: Border(bottom: BorderSide(color: palette.surfaceAlt))),
+        child: Row(children: [
+          CircleAvatar(
+            radius: 22,
+            backgroundColor: palette.surfaceAlt,
+            child: Icon(Icons.table_restaurant_rounded, color: theme.colorScheme.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(names, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                _SeatDots(filled: table.seated, seats: table.maxSeats),
+                Text(MoneyFormatter.compactEtb(table.stakeMinor), style: AppType.money(size: 16, color: palette.money)),
+                Text('Round ${table.round}', style: theme.textTheme.bodySmall),
+              ]),
+            ]),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(72, 40),
+              foregroundColor: theme.colorScheme.primary,
+              side: BorderSide(color: enabled ? AppColors.gold : palette.border, width: 1.5),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              textStyle: AppType.ui(size: 15, weight: FontWeight.w700),
+            ),
+            onPressed: enabled ? onJoin : null,
+            child: const Text('Join'),
+          ),
+        ]),
+      ),
     );
   }
 }
@@ -1175,8 +1333,11 @@ class _CustomStakeSheetState extends ConsumerState<_CustomStakeSheet> {
     final palette = AppPalette.of(context);
     final balanceMinor = ref.watch(walletControllerProvider.select((s) => s.wallet?.availableBalance))?.toInt();
     final balanceEtb = balanceMinor == null ? null : balanceMinor ~/ 100;
-    final stakes = ref.read(liveLobbyControllerProvider).stakes;
+    final lobby = ref.read(liveLobbyControllerProvider);
+    final stakes = lobby.stakes;
     final feeBps = stakes.isEmpty ? 0 : stakes.first.platformFeeBps;
+    // Everyone in one match puts in the stake (a Karta table round: two).
+    final inMatch = lobby.myStake?.matchPlayers ?? 2;
 
     final etb = int.tryParse(_amount.text);
     final String? problem = switch (etb) {
@@ -1187,7 +1348,7 @@ class _CustomStakeSheetState extends ConsumerState<_CustomStakeSheet> {
       _ => null,
     };
     final valid = etb != null && problem == null;
-    final prizeMinor = valid ? etb * 100 * 2 - (etb * 100 * 2 * feeBps ~/ 10000) : null;
+    final prizeMinor = valid ? etb * 100 * inMatch - (etb * 100 * inMatch * feeBps ~/ 10000) : null;
 
     final quick = [100, 200, 500, 1000].where((v) => balanceEtb == null || v <= balanceEtb).toList();
 

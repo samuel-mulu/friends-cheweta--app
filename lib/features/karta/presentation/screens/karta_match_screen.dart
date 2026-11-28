@@ -23,8 +23,14 @@ import 'package:friends_game_app/features/profile/presentation/controllers/prefe
 /// lets the chooser pick a rank, lets the starter turn ("lat") the cards,
 /// and shows each round's result with its fairness check.
 class KartaMatchScreen extends ConsumerStatefulWidget {
-  const KartaMatchScreen({super.key, required this.matchId});
+  const KartaMatchScreen({super.key, required this.matchId, this.tableMode = false, this.onLeaveTable});
   final String matchId;
+
+  /// One round of a Karta table (shown inside the table screen): no result
+  /// screen, the table handles back and leaving, and players waiting in the
+  /// queue watch the round.
+  final bool tableMode;
+  final VoidCallback? onLeaveTable;
 
   @override
   ConsumerState<KartaMatchScreen> createState() => _KartaMatchScreenState();
@@ -73,6 +79,11 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
     final me = ref.read(authControllerProvider).user?.id;
     final before = previous?.game;
     final game = next.game;
+    // A table round opened on its own (the lobby's first pairing): the table screen shows it.
+    if (!widget.tableMode && game != null && game.isTableRound && before == null) {
+      context.go(GameRoutes.kartaTable);
+      return;
+    }
     if (before == null || game == null) return;
 
     if (game.dealt.length > before.dealt.length || next.roundEnd?.seq != previous?.roundEnd?.seq) _play(GameSound.step, volume: 0.6);
@@ -84,10 +95,12 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
       _roundTimer?.cancel();
       _roundTimer = Timer(_roundPause, () {
         if (!mounted) return;
+        // A table round ends with its banner; the next round follows by itself.
+        if (widget.tableMode) return;
         setState(() => _shownRound = null);
         if (ref.read(kartaMatchControllerProvider).game?.finished == true) _celebrate();
       });
-    } else if (game.finished && !before.finished && _shownRound == null) {
+    } else if (game.finished && !before.finished && _shownRound == null && !widget.tableMode) {
       _celebrate(); // e.g. a resignation
     }
     if (!game.finished && game.currentPlayerId == me && before.currentPlayerId != me && game.calling) {
@@ -127,7 +140,7 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
   }
 
   @override
-  Widget build(BuildContext context) => MatchBackGuard(onBack: _onSystemBack, child: _screen(context));
+  Widget build(BuildContext context) => widget.tableMode ? _screen(context) : MatchBackGuard(onBack: _onSystemBack, child: _screen(context));
 
   /// Phone back: ask before leaving a live match; a finished one opens its result.
   void _onSystemBack() {
@@ -165,7 +178,9 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
       );
     }
 
-    final opponent = game.otherThan(me);
+    // I sit at the bottom; someone watching a table round sees the receiver there.
+    final bottom = game.playerIds.contains(me) ? me : game.callerId;
+    final opponent = game.otherThan(bottom);
     final shown = _shownRound;
     final dealt = shown?.dealt ?? game.dealt;
     final connected = socket == GameSocketStatus.connected;
@@ -177,7 +192,11 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
           name: userId == me ? 'You' : match.nameOf(userId),
           score: game.scoreOf(userId),
           target: game.targetScore,
-          role: shown != null || game.finished ? null : (game.starterId == userId ? 'STARTER' : 'CHOOSER'),
+          role: shown != null || game.finished
+              ? null
+              : game.starterId == userId
+                  ? 'STARTER'
+                  : (widget.tableMode ? 'RECEIVER' : 'CHOOSER'),
           active: shown == null && !game.finished && game.currentPlayerId == userId,
           turnEndsAt: game.currentPlayerId == userId ? match.timing.turnEndsAt : null,
           turnSeconds: match.turnSeconds,
@@ -230,10 +249,10 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
                       ]),
                     ),
                     _Lane(
-                        cards: dealt.where((d) => d.playerId == me).map((d) => d.card).toList(),
-                        winning: shown?.result.winnerId == me ? shown!.result.card : null),
+                        cards: dealt.where((d) => d.playerId == bottom).map((d) => d.card).toList(),
+                        winning: shown?.result.winnerId == bottom ? shown!.result.card : null),
                     const SizedBox(height: 8),
-                    seat(me),
+                    seat(bottom),
                   ]),
                 ),
               ),
@@ -243,6 +262,8 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
                   if (match.error != null) MatchInlineMessage(message: match.error!),
                   if (shown != null)
                     _RoundBanner(round: shown, mine: shown.result.winnerId == me, winner: match.nameOf(shown.result.winnerId))
+                  else if (game.finished && widget.tableMode)
+                    Text('Next round starting…', style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontWeight: FontWeight.w600))
                   else if (game.finished)
                     FilledButton.icon(
                       onPressed: () => context.pushReplacement(GameRoutes.result(GameCodes.karta, widget.matchId)),
@@ -285,6 +306,10 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
   }
 
   Future<void> _exit(KartaGame game) async {
+    if (widget.tableMode) {
+      widget.onLeaveTable?.call();
+      return;
+    }
     if (game.finished) {
       context.pushReplacement(GameRoutes.result(GameCodes.karta, widget.matchId));
       return;
@@ -325,7 +350,7 @@ class _KartaMatchScreenState extends ConsumerState<KartaMatchScreen> with Widget
                 ref.read(kartaMatchControllerProvider.notifier).recover();
               },
             ),
-            if (!game.finished)
+            if (!game.finished && !widget.tableMode)
               ListTile(
                 leading: Icon(Icons.flag_outlined, color: Theme.of(context).colorScheme.error),
                 title: Text('Resign', style: TextStyle(color: Theme.of(context).colorScheme.error)),
@@ -353,6 +378,8 @@ Future<void> showKartaRules(BuildContext context) => showModalBottomSheet<void>(
             _Rule(Icons.style_outlined, 'Lat lat!', 'The starter turns every card: one for the chooser, one for themselves, and so on.'),
             _Rule(Icons.emoji_events_outlined, 'Catch it', 'Whoever gets the first card of that rank wins the round and starts the next one.'),
             _Rule(Icons.workspace_premium_outlined, 'First to 3', 'The first player to win 3 rounds wins the match. You can resign at any time.'),
+            _Rule(Icons.table_restaurant_outlined, 'ጠረጴዛ · Table',
+                'Up to 4 sit at a table. Each round is one of these, paid at once: the winner keeps dealing, the loser waits at the back, the next in line plays.'),
             _Rule(Icons.verified_user_outlined, 'Fair deck',
                 'Each deck is sealed (a secure fingerprint) before the call and revealed after the round. The app checks it.'),
           ]),

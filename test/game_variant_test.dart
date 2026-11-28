@@ -29,7 +29,8 @@ void main() {
     test('each game lists its types; one is the classic default', () {
       expect(GameVariants.of('DAMA').map((v) => v.name), ['እግረኛ', 'ታንከኛ']);
       expect(GameVariants.of('LUDO').map((v) => v.name), ['መመለስ ያለበት', 'መመለስ የሌለበት', 'መመለስ የረሳ ይሸነፋል']);
-      expect(GameVariants.of('KARTA'), isEmpty);
+      expect(GameVariants.of('KARTA').map((v) => v.rulesVersion), ['KARTA_LATLAT_V1', 'KARTA_TABLE_V1']);
+      expect(GameVariants.defaultOf('KARTA'), GameVariants.kartaClassic);
       expect(GameVariants.defaultOf('DAMA'), GameVariants.damaClassic);
       expect(GameVariants.defaultOf('LUDO'), GameVariants.ludoClassic);
     });
@@ -55,7 +56,8 @@ void main() {
       const prefs = PlayerPreferences(variantByGame: {'LUDO': 'LUDO_MISSED_CAPTURE_V1'});
       expect(prefs.variantFor('LUDO'), GameVariants.ludoMissedCapture);
       expect(prefs.variantFor('DAMA'), GameVariants.damaClassic);
-      expect(prefs.variantFor('KARTA'), isNull);
+      expect(prefs.variantFor('KARTA'), GameVariants.kartaClassic);
+      expect(prefs.variantFor('CHESS'), isNull);
     });
   });
 

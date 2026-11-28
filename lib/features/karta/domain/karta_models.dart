@@ -99,9 +99,14 @@ class KartaGame {
     this.lastRound,
     this.winnerOrder = const [],
     this.finishReason,
+    this.rulesVersion = 'KARTA_LATLAT_V1',
   });
 
   final String matchId;
+
+  /// KARTA_LATLAT_V1 (1v1) or KARTA_TABLE_V1 (one round of a queue table).
+  final String rulesVersion;
+  bool get isTableRound => rulesVersion == 'KARTA_TABLE_V1';
   final int version;
   final bool finished;
   final List<String> playerIds;
@@ -159,6 +164,7 @@ class KartaGame {
         lastRound: KartaRoundResult.fromJson(json['lastRound']),
         winnerOrder: (json['winnerOrder'] as List? ?? const []).map((e) => e.toString()).toList(),
         finishReason: json['finishReason']?.toString(),
+        rulesVersion: json['rulesVersion']?.toString() ?? 'KARTA_LATLAT_V1',
       );
 
   KartaGame copyWith({
@@ -200,6 +206,7 @@ class KartaGame {
         lastRound: lastRound ?? this.lastRound,
         winnerOrder: winnerOrder ?? this.winnerOrder,
         finishReason: finishReason ?? this.finishReason,
+        rulesVersion: rulesVersion,
       );
 }
 

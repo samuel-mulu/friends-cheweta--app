@@ -236,7 +236,7 @@ class MatchPresenter {
 
   TurnBannerData get banner {
     LudoMatchParticipant? find(String? id) => participants.where((p) => p.userId == id).firstOrNull;
-    String name(String? id) => (find(id)?.displayLabel() ?? 'Opponent').toUpperCase();
+    String name(String? id) => (find(id)?.displayLabel() ?? 'Player').toUpperCase();
     const gold = Color(0xFFFFC83D);
 
     if (timeline.isCatchingUp) return const TurnBannerData('CATCHING UP…', gold);
@@ -282,7 +282,7 @@ class MatchPresenter {
     if (game.phase == LudoMatchPhase.finished && snapshot.missedCapturePlayerIds.isNotEmpty) {
       final missed = snapshot.missedCapturePlayerIds.first;
       if (missed == me) return 'You could send a token home but moved another: the match is lost.';
-      final who = participants.where((p) => p.userId == missed).firstOrNull?.displayLabel() ?? 'Your opponent';
+      final who = participants.where((p) => p.userId == missed).firstOrNull?.displayLabel() ?? 'A player';
       return '$who could send a token home but moved another: they lose.';
     }
     if (timeline.blocking || !drained || game.currentPlayerId != me || game.phase != LudoMatchPhase.playing) return '';

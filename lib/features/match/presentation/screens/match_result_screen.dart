@@ -90,6 +90,9 @@ class _MatchResultScreenState extends ConsumerState<MatchResultScreen> {
             final mine = me == null ? null : match.participant(me);
             final draw = match.isDraw;
             final won = !draw && (mine?.resultPosition == 1 || (match.winnerOrder.isNotEmpty && match.winnerOrder.first == me));
+            // 3–4 players: say where I finished ("2nd of 4").
+            final players = match.participants.length;
+            final place = mine?.resultPosition ?? (me == null ? 0 : match.winnerOrder.indexOf(me) + 1);
             final settlement = match.settlement;
             final processing = match.status == 'FINISHING' || settlement == null;
             return SafeArea(
@@ -113,7 +116,9 @@ class _MatchResultScreenState extends ConsumerState<MatchResultScreen> {
                           ? 'Draw'
                           : won
                               ? 'Victory'
-                              : 'Match complete',
+                              : players > 2 && place > 1
+                                  ? '${_ordinal(place)} of $players'
+                                  : 'Match complete',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.headlineMedium),
                   const SizedBox(height: 6),
@@ -181,7 +186,7 @@ class _MatchResultScreenState extends ConsumerState<MatchResultScreen> {
                   if (match.isPractice) ...[
                     _PlayAgainCard(gameCode: widget.gameCode),
                     const SizedBox(height: 16),
-                  ] else if (match.status == 'FINISHED' && me != null) ...[
+                  ] else if (match.status == 'FINISHED' && me != null && players == 2) ...[
                     _RematchCard(me: me),
                     const SizedBox(height: 16),
                   ],
@@ -203,6 +208,12 @@ class _MatchResultScreenState extends ConsumerState<MatchResultScreen> {
     );
   }
 }
+
+String _ordinal(int n) => switch (n) {
+      2 => '2nd',
+      3 => '3rd',
+      _ => '${n}th',
+    };
 
 class _ResultRow extends StatelessWidget {
   const _ResultRow({required this.label, required this.value});

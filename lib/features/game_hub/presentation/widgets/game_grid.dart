@@ -34,7 +34,7 @@ class GameCatalogEntry {
 
 /// Live games first (in the order players use them), then what is coming.
 const gameCatalog = <GameCatalogEntry>[
-  GameCatalogEntry(code: 'LUDO', name: 'Ludo', tagline: 'Classic 1v1, race home', tile: Color(0xFF16264F), route: '/ludo'),
+  GameCatalogEntry(code: 'LUDO', name: 'Ludo', tagline: 'Race home · 1v1 to 4 players', tile: Color(0xFF16264F), route: '/ludo'),
   GameCatalogEntry(code: 'DAMA', name: 'Dama', tagline: 'Ethiopian draughts', tile: Color(0xFF4A2C14), route: '/dama'),
   GameCatalogEntry(code: 'KARTA', name: 'Karta Lat Lat', tagline: 'Call the card, catch it first', tile: Color(0xFF0E3B2A), route: '/karta'),
   GameCatalogEntry(code: 'BINGO', name: 'Bingo', tagline: 'Coming soon', tile: AppColors.raised, icon: Icons.grid_on_rounded),

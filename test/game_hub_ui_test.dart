@@ -33,6 +33,19 @@ const _catalog = GameHubState(modesByGame: {
   'LUDO': [_mode]
 });
 
+const _mode4 = GameMode(
+  id: 'ludo-4p',
+  gameId: 'ludo',
+  code: 'LUDO_4P_10',
+  name: 'Ludo 4 players 10',
+  playerCount: 4,
+  stakeAmountMinor: 1000,
+  platformFeeBps: 500,
+  turnDurationSeconds: 30,
+  rulesVersion: 'LUDO_CLASSIC_V3',
+  enabled: true,
+);
+
 class _Hub extends GameHubController {
   _Hub(this.initial);
   final GameHubState initial;
@@ -255,5 +268,43 @@ void main() {
     await tester.tap(find.bySemanticsLabel('Show the panel'));
     await tester.pumpAndSettle();
     expect(find.text('Auto-match'), findsOneWidget);
+  });
+
+  testWidgets('a 4-player stake: size chips, no 1v1 Play button, and the table fills to 2/4', (tester) async {
+    const reply = {
+      'ok': true,
+      'data': {
+        'gameModeId': 'ludo-4p',
+        'myState': 'ONLINE',
+        'players': [
+          {'userId': 'opponent', 'displayName': 'Dawit Gebremariam', 'gameModeId': 'ludo-4p', 'state': 'READY', 'tokensToWin': 4},
+        ],
+      },
+    };
+    final socket = FakeSocket()..reply = (event, _) => event == 'lobby:join_game' ? reply : {'ok': true};
+    await _showHub(
+      tester,
+      hub: _Hub(const GameHubState(modesByGame: {
+        'LUDO': [_mode, _mode4]
+      })),
+      socket: socket,
+      lobby: true,
+    );
+
+    expect(find.bySemanticsLabel(RegExp('^4 players')), findsOneWidget);
+    expect(find.text('Play'), findsNothing);
+    expect(find.text('Auto-match'), findsNothing);
+
+    await tester.tap(find.textContaining("I'm ready", findRichText: true));
+    await tester.pump();
+    socket.push('lobby:player_ready', {
+      'gameModeId': 'ludo-4p',
+      'player': {'userId': 'me', 'displayName': 'Me', 'state': 'READY', 'gameModeId': 'ludo-4p', 'tokensToWin': 4},
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Waiting for players 2/4'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox()); // stop the waiting loader
   });
 }

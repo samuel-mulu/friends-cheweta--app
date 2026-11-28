@@ -8,6 +8,7 @@ import 'package:friends_game_app/features/chat/domain/chat_message.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_mode.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 import 'package:friends_game_app/features/game_hub/domain/game_variant.dart';
+import 'package:friends_game_app/features/karta/domain/karta_table.dart';
 import 'package:friends_game_app/features/live_lobby/domain/lobby_challenge.dart';
 import 'package:friends_game_app/features/live_lobby/domain/lobby_player.dart';
 
@@ -32,6 +33,8 @@ class LiveLobbyState {
     this.sendingMessage = false,
     this.pendingChallengeUserId,
     this.chatUnread = 0,
+    this.tables = const [],
+    this.activeTableId,
   });
 
   /// Set while the lobby screen is open.
@@ -60,6 +63,12 @@ class LiveLobbyState {
   final bool sendingMessage;
   final String? pendingChallengeUserId;
   final int chatUnread;
+
+  /// Karta tables with a free seat (join mid-game).
+  final List<KartaTable> tables;
+
+  /// The Karta table I sit at: the screen opens it.
+  final String? activeTableId;
 
   bool get isOpen => gameCode != null;
   bool get isReady => myState == LobbyPlayerState.ready;
@@ -97,17 +106,58 @@ class LiveLobbyState {
   /// [visibleStakes] of one rules version.
   List<GameMode> stakesOfRules(String rulesVersion) => visibleStakes.where((stake) => stake.rulesVersion == rulesVersion).toList();
 
+  /// [visibleStakes] of a type ([rules], null = any) and a table size ([players], null = any).
+  List<GameMode> stakesOf({String? rules, int? players}) => visibleStakes
+      .where((stake) => (rules == null || stake.rulesVersion == rules) && (players == null || stake.playerCount == players))
+      .toList();
+
+  /// Players at my stake's table (2 = 1v1).
+  int get myPlayers => myStake?.playerCount ?? 2;
+
+  /// Table sizes the catalog offers for my type (a 2 · 3 · 4 picker when more than one).
+  List<int> get offeredPlayerCounts {
+    final rules = myRules;
+    final counts = {
+      for (final stake in stakes)
+        if (!stake.custom && (rules == null || stake.rulesVersion == rules)) stake.playerCount,
+    }.toList()
+      ..sort();
+    return counts;
+  }
+
   /// Where switching to [rulesVersion] lands: the catalog stake of [amountMinor]
   /// of that type if there is one, else its smallest catalog stake.
-  GameMode? stakeForRules(String rulesVersion, {int? amountMinor}) {
+  GameMode? stakeForRules(String rulesVersion, {int? amountMinor}) =>
+      stakeFor(rules: rulesVersion, players: myPlayers, amountMinor: amountMinor) ?? stakeFor(rules: rulesVersion, amountMinor: amountMinor);
+
+  /// The catalog stake of [rules] (null = mine) and [players] (null = any) at
+  /// [amountMinor] if there is one, else the smallest such stake.
+  GameMode? stakeFor({String? rules, int? players, int? amountMinor}) {
     GameMode? smallest;
     for (final stake in stakes) {
-      if (stake.custom || stake.rulesVersion != rulesVersion) continue;
+      if (stake.custom || (rules != null && stake.rulesVersion != rules) || (players != null && stake.playerCount != players)) continue;
       if (stake.stakeAmountMinor == amountMinor) return stake;
       if (smallest == null || stake.stakeAmountMinor < smallest.stakeAmountMinor) smallest = stake;
     }
     return smallest;
   }
+
+  /// Other players ready at a stake of [players] (my type).
+  int readyCountOfPlayers(int players) => players == myPlayers && myStakeId != null
+      ? readyCountAt(myStakeId!)
+      : this
+          .players
+          .where((p) => p.isReady && !isMe(p.userId) && stakeById(p.gameModeId)?.playerCount == players && stakeById(p.gameModeId)?.rulesVersion == myRules)
+          .length;
+
+  /// A 3–4 player table at my stake: how many sit ready for it (me included),
+  /// at my goal ([tokensToWin], Ludo).
+  int tableFill({int? tokensToWin}) =>
+      players.where((p) => p.isReady && p.gameModeId == myStakeId && !isMe(p.userId) && (tokensToWin == null || (p.tokensToWin ?? 4) == tokensToWin)).length +
+      (isReady ? 1 : 0);
+
+  /// Open Karta tables at my stake.
+  List<KartaTable> get tablesHere => tables.where((table) => table.gameModeId == myStakeId && table.freeSeats > 0).toList();
 
   /// Other players ready at a stake of [rulesVersion].
   int readyCountOfRules(String rulesVersion) =>
@@ -208,6 +258,9 @@ class LiveLobbyState {
     String? pendingChallengeUserId,
     bool clearPendingChallenge = false,
     int? chatUnread,
+    List<KartaTable>? tables,
+    String? activeTableId,
+    bool clearActiveTable = false,
   }) {
     return LiveLobbyState(
       gameCode: gameCode ?? this.gameCode,
@@ -227,6 +280,8 @@ class LiveLobbyState {
       sendingMessage: sendingMessage ?? this.sendingMessage,
       pendingChallengeUserId: clearPendingChallenge ? null : pendingChallengeUserId ?? this.pendingChallengeUserId,
       chatUnread: chatUnread ?? this.chatUnread,
+      tables: tables ?? this.tables,
+      activeTableId: clearActiveTable ? null : activeTableId ?? this.activeTableId,
     );
   }
 
@@ -272,6 +327,7 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
     String? stakeId,
     int? customStakeMinor,
     String? rulesVersion,
+    int? playerCount,
   }) async {
     final currentUserId = ref.read(authControllerProvider).user?.id;
     final sorted = [...stakes]..sort((a, b) => a.stakeAmountMinor.compareTo(b.stakeAmountMinor));
@@ -289,6 +345,7 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
         if (stakeId != null && customStakeMinor == null) 'gameModeId': stakeId,
         if (customStakeMinor != null) 'customStakeMinor': customStakeMinor,
         if (customStakeMinor != null && rulesVersion != null) 'rulesVersion': rulesVersion,
+        if (customStakeMinor != null && playerCount != null && playerCount > 2) 'playerCount': playerCount,
       });
       if (state.gameCode != gameCode) return; // left while waiting
       if (ack['ok'] != true) {
@@ -300,6 +357,7 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
           data['activeChallenge'] is Map ? LobbyChallenge.fromJson(Map<String, dynamic>.from(data['activeChallenge'] as Map)) : null;
       final activeMatch = data['activeMatch'] is Map ? data['activeMatch']['id']?.toString() : null;
       final activeGame = activeMatch != null ? gameCodeOfMatch(data['activeMatch']) : activeChallenge?.matchGameCode;
+      final activeTable = data['activeTable'] is Map ? data['activeTable']['id']?.toString() : null;
       final base = LiveLobbyState(
         gameCode: gameCode,
         stakes: _stakesFrom(data['stakes'], gameCode) ?? state.stakes,
@@ -311,6 +369,8 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
         acceptedMatchId: activeMatch ?? activeChallenge?.matchId,
         acceptedGameCode: activeGame,
         messages: _parseMessages(data['recentMessages']),
+        tables: _parseTables(data['tables']),
+        activeTableId: activeTable,
       );
       state = base.withNormalizedPlayers(_parsePlayers(data['players']));
     } catch (_) {
@@ -331,11 +391,11 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
 
   /// Sit at a stake of any amount (whole ETB), of game type [rulesVersion]
   /// (default: the server's). The server checks the balance.
-  Future<void> playCustomStake(int amountMinor, {String? rulesVersion}) async {
+  Future<void> playCustomStake(int amountMinor, {String? rulesVersion, int? playerCount}) async {
     final gameCode = state.gameCode;
     if (gameCode == null || state.busy || state.isChallenged) return;
     final wasReady = state.isReady;
-    await open(gameCode, stakes: state.stakes, customStakeMinor: amountMinor, rulesVersion: rulesVersion);
+    await open(gameCode, stakes: state.stakes, customStakeMinor: amountMinor, rulesVersion: rulesVersion, playerCount: playerCount ?? state.myPlayers);
     if (wasReady && state.myStake?.stakeAmountMinor == amountMinor && !state.isReady) await ready();
   }
 
@@ -349,6 +409,41 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
     final filtered = state.stakeById(state.filterStakeId);
     if (filtered != null && filtered.rulesVersion != rulesVersion) state = state.copyWith(clearFilter: true);
     await changeStake(target.id);
+  }
+
+  /// Switch table size (2 · 3 · 4 players) at my type: the same amount if that
+  /// size has it, else its smallest stake. A ready player stays ready.
+  Future<void> switchPlayers(int players) async {
+    if (state.myPlayers == players || state.busy || state.isChallenged) return;
+    final target = state.stakeFor(rules: state.myRules, players: players, amountMinor: state.myStake?.stakeAmountMinor);
+    if (target == null) return;
+    final filtered = state.stakeById(state.filterStakeId);
+    if (filtered != null && filtered.playerCount != players) state = state.copyWith(clearFilter: true);
+    await changeStake(target.id);
+  }
+
+  /// Sit at a Karta table (back of its queue). True when seated; the screen
+  /// then opens the table.
+  Future<bool> joinTable(String tableId) async {
+    if (state.busy) return false;
+    state = state.copyWith(busy: true, clearError: true);
+    try {
+      final ack = await ref.read(gameSocketServiceProvider).emitWithAck('karta:table:join', {'tableId': tableId});
+      final data = ack['data'];
+      if (ack['ok'] == true && data is Map) {
+        state = state.copyWith(busy: false, activeTableId: data['id']?.toString() ?? tableId);
+        return true;
+      }
+      state = state.copyWith(busy: false, error: _message(ack));
+    } catch (_) {
+      state = state.copyWith(busy: false, error: 'Could not join the table.');
+    }
+    return false;
+  }
+
+  /// The screen opened the table: forget it here.
+  void clearActiveTable() {
+    if (state.activeTableId != null) state = state.copyWith(clearActiveTable: true);
   }
 
   /// What the player asked for the last time they got ready (reused when a
@@ -609,6 +704,19 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
       case 'lobby:chat:message':
         _appendMessage(ChatMessage.fromJson(data));
         break;
+      case 'lobby:table':
+        final raw = data['table'];
+        if (raw is Map) {
+          final table = KartaTable.fromJson(Map<String, dynamic>.from(raw)..putIfAbsent('gameModeId', () => data['gameModeId']));
+          final others = state.tables.where((item) => item.id != table.id);
+          state = state.copyWith(tables: [...others, if (!table.isClosed && table.freeSeats > 0) table]);
+        }
+        break;
+      case 'karta:table:state':
+        // "I'm ready" seated me at a table: open it.
+        final id = data['id']?.toString();
+        if (id != null && state.activeTableId != id) state = state.copyWith(activeTableId: id, busy: false);
+        break;
       case 'challenge:created':
       case 'challenge:received':
         final challenge = LobbyChallenge.fromJson(data);
@@ -669,6 +777,11 @@ class LiveLobbyController extends Notifier<LiveLobbyState> {
     return raw.whereType<Map>().map((item) => LobbyPlayer.fromJson(Map<String, dynamic>.from(item))).toList();
   }
 
+  List<KartaTable> _parseTables(Object? raw) {
+    if (raw is! List) return const [];
+    return raw.whereType<Map>().map((item) => KartaTable.fromJson(Map<String, dynamic>.from(item))).toList(growable: false);
+  }
+
   List<ChatMessage> _parseMessages(Object? raw) {
     if (raw is! List) return const [];
     return raw.whereType<Map>().map((item) => ChatMessage.fromJson(Map<String, dynamic>.from(item))).toList(growable: false);
@@ -706,6 +819,10 @@ String lobbyErrorText(String? code, String? fallback) => switch (code) {
       'LOBBY_NOT_JOINED' => 'Reconnecting to the lobby…',
       'CHALLENGE_EXPIRED' => 'The request expired.',
       'CHALLENGE_NOT_PENDING' => 'That request is no longer open.',
+      'TABLE_AUTO_ONLY' => "This table fills by itself: tap I'm ready.",
+      'TABLE_FULL' => 'That table just filled up.',
+      'TABLE_NOT_FOUND' => 'That table has closed.',
+      'TABLE_ALREADY_SEATED' => 'You are already at a table.',
       'RATE_LIMITED' => 'Slow down a little and try again.',
       'ACK_TIMEOUT' || 'SOCKET_DISCONNECTED' => 'Connection is slow. Try again in a moment.',
       _ => fallback ?? 'Something went wrong. Try again.',

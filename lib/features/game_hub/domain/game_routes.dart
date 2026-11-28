@@ -12,6 +12,9 @@ abstract final class GameRoutes {
   static String match(String gameCode, String matchId) => '${lobby(gameCode)}/match/$matchId';
   static String result(String gameCode, String matchId) => '${lobby(gameCode)}/result/$matchId';
 
+  /// The Karta queue table I sit at (the server knows which).
+  static const kartaTable = '/karta/table';
+
   static String displayName(String gameCode) => switch (gameCode) {
         GameCodes.dama => 'Dama',
         GameCodes.karta => 'Karta Lat Lat',

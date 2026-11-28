@@ -1,5 +1,8 @@
 import 'package:friends_game_app/features/game_hub/domain/game_routes.dart';
 
+/// Karta queue table: the winner keeps dealing, every round pays at once.
+const kartaTableRules = 'KARTA_TABLE_V1';
+
 class GameMode {
   const GameMode({
     required this.id,
@@ -48,7 +51,19 @@ class GameMode {
         custom: custom,
       );
 
-  int get totalPotMinor => stakeAmountMinor * playerCount;
+  /// A Karta queue table: [playerCount] is its seats; every round is 1v1.
+  bool get isKartaTable => rulesVersion == kartaTableRules;
+
+  /// Players in one match (a Karta table round is always two).
+  int get matchPlayers => isKartaTable ? 2 : playerCount;
+
+  /// A 3–4 player match that fills by itself from ready players (Ludo).
+  bool get isAutoTable => matchPlayers > 2;
+
+  /// Where several play (a 3–4 player match, or a Karta table): no 1v1 requests.
+  bool get isMultiplayer => isAutoTable || isKartaTable;
+
+  int get totalPotMinor => stakeAmountMinor * matchPlayers;
 
   int get estimatedFeeMinor => (totalPotMinor * platformFeeBps) ~/ 10000;
 

@@ -117,7 +117,7 @@ class _CommunicationsHostState extends ConsumerState<CommunicationsHost>
   }
 
   bool get _isMatchRoute =>
-      RegExp(r'^/(ludo|dama|karta)/match/[^/]+$').hasMatch(_currentPath());
+      RegExp(r'^/((ludo|dama|karta)/match/[^/]+|karta/table)$').hasMatch(_currentPath());
 
   bool _blocking(BroadcastInbox? inbox) =>
       inbox?.forced != null && _currentPath() != inbox?.matchPath;

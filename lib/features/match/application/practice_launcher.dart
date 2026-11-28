@@ -36,6 +36,10 @@ typedef PracticeStart = ({String matchId, String gameCode});
 /// Last level chosen this session (for "Play again" on the result screen).
 final lastPracticeLevelProvider = StateProvider<PracticeLevel?>((ref) => null);
 
+/// Ludo: players at the last practice table this session (2 = 1v1; 3–4 with
+/// one bot of each level).
+final practicePlayersProvider = StateProvider<int>((ref) => 2);
+
 /// Practice games started (or resumed) on this device, so the match screens
 /// can say that leaving one costs nothing.
 final practiceMatchIdsProvider = StateProvider<Set<String>>((ref) => const {});
@@ -53,6 +57,7 @@ class PracticeLauncher {
     int tokensToWin = 4,
     String gameCode = GameCodes.ludo,
     GameVariant? variant,
+    int players = 2,
   }) async {
     final ack = await _ref.read(gameSocketServiceProvider).emitWithAck('practice:start', {
       'commandId': _uuid.v4(),
@@ -60,6 +65,7 @@ class PracticeLauncher {
       if (gameCode == GameCodes.ludo) 'tokensToWin': tokensToWin,
       if (gameCode != GameCodes.ludo) 'game': gameCode,
       if (variant != null && variant.gameCode == gameCode) 'rulesVersion': variant.rulesVersion,
+      if (gameCode == GameCodes.ludo && players > 2) 'players': players,
     });
     final data = ack['data'];
     final matchId = ack['ok'] == true && data is Map ? data['matchId']?.toString() : null;
@@ -67,6 +73,8 @@ class PracticeLauncher {
       throw PracticeStartException(switch (ack['code']?.toString()) {
         'LOBBY_ACTIVE_MATCH' => 'Finish your current match first.',
         'PRACTICE_UNAVAILABLE' => 'Practice is not available right now.',
+        // An older server: no tables yet.
+        _ when '${ack['message']}'.contains('players should not exist') => '3–4 player practice is not available yet. Try 1v1.',
         _ => ack['message']?.toString() ?? 'Could not start practice.',
       });
     }
@@ -93,6 +101,7 @@ Future<void> showPracticeSheet(BuildContext context, WidgetRef ref, {String game
   final variants = GameVariants.of(gameCode);
   var variant = prefs.variantFor(gameCode);
   var goal = prefs.tokensToWin;
+  var players = ref.read(practicePlayersProvider);
   final level = await showModalBottomSheet<PracticeLevel>(
     context: context,
     showDragHandle: true,
@@ -118,6 +127,11 @@ Future<void> showPracticeSheet(BuildContext context, WidgetRef ref, {String game
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                   child: GoalChips(selected: goal, onChanged: (next) => setSheet(() => goal = next)),
                 ),
+              if (gameCode == GameCodes.ludo)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                  child: PlayerCountChips(counts: const [2, 3, 4], selected: players, onChanged: (next) => setSheet(() => players = next)),
+                ),
               for (final level in PracticeLevel.values)
                 ListTile(
                   leading: Icon(level.icon),
@@ -137,6 +151,7 @@ Future<void> showPracticeSheet(BuildContext context, WidgetRef ref, {String game
   final preferences = ref.read(playerPreferencesProvider.notifier);
   if (variant != null) await preferences.setVariant(variant!);
   if (gameCode == GameCodes.ludo) await preferences.setTokensToWin(goal);
+  ref.read(practicePlayersProvider.notifier).state = players;
   if (!context.mounted) return;
   await startPractice(context, ref, level, gameCode: gameCode);
 }
@@ -148,7 +163,13 @@ Future<void> startPractice(BuildContext context, WidgetRef ref, PracticeLevel le
     final prefs = ref.read(playerPreferencesProvider);
     final started = await ref
         .read(practiceLauncherProvider)
-        .start(level, tokensToWin: prefs.tokensToWin, gameCode: gameCode, variant: prefs.variantFor(gameCode));
+        .start(
+          level,
+          tokensToWin: prefs.tokensToWin,
+          gameCode: gameCode,
+          variant: prefs.variantFor(gameCode),
+          players: ref.read(practicePlayersProvider),
+        );
     if (context.mounted) context.go(GameRoutes.match(started.gameCode, started.matchId));
   } catch (error) {
     messenger.showSnackBar(SnackBar(content: Text(error is PracticeStartException ? error.message : 'Could not start practice.')));

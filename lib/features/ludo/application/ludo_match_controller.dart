@@ -411,7 +411,7 @@ class LudoMatchController extends Notifier<LudoMatchViewState> {
   String _ackMessage(Map<String, dynamic> ack) {
     switch (ack['code']?.toString()) {
       case 'WAITING_FOR_OPPONENT_JOIN':
-        return 'Waiting for your opponent to join the match.';
+        return 'Waiting for the other players to join the match.';
       case 'MATCH_VERSION_CONFLICT':
         return 'Your game state was behind the server. Recovering the match…';
       case 'NOT_PLAYER_TURN':

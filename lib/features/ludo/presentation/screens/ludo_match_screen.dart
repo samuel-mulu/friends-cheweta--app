@@ -211,7 +211,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
               .where((p) => p.userId == next.playerId)
               .firstOrNull
               ?.displayLabel() ??
-          'Opponent';
+          'A player';
       final text = next.playerId == me
           ? 'Time ran out, so we played for you (${next.strikes}/${next.maxStrikes}).'
               '${left > 0 ? ' $left more and you forfeit.' : ''}'
@@ -433,7 +433,7 @@ class _LudoMatchScreenState extends ConsumerState<LudoMatchScreen> with WidgetsB
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Resign match?'),
-        content: const Text('Resigning ends your participation and may settle the match for your opponent.'),
+        content: const Text('Resigning ends your participation; the other players carry on, and your stake is lost.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep playing')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Resign')),

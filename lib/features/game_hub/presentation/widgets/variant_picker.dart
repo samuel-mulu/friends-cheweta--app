@@ -14,6 +14,8 @@ extension GameVariantIcon on GameVariant {
         'LUDO_CLASSIC_V3' => Icons.undo_rounded,
         'LUDO_NO_CAPTURE_V1' => Icons.handshake_rounded,
         'LUDO_MISSED_CAPTURE_V1' => Icons.warning_amber_rounded,
+        'KARTA_LATLAT_V1' => Icons.style_rounded,
+        'KARTA_TABLE_V1' => Icons.table_restaurant_rounded,
         _ => Icons.sports_esports_rounded,
       };
 }
@@ -271,6 +273,125 @@ class GoalChips extends StatelessWidget {
           ),
         ],
       ]),
+    );
+  }
+}
+
+/// How many play: 2 (1v1), 3 or 4, as a row of chips (people icons). For a
+/// Karta table it is the number of seats. Shows how many wait at each size.
+class PlayerCountChips extends StatelessWidget {
+  const PlayerCountChips({
+    super.key,
+    required this.counts,
+    required this.selected,
+    required this.onChanged,
+    this.readyCounts = const {},
+    this.enabled = true,
+    this.seats = false,
+  });
+  final List<int> counts;
+  final int selected;
+  final ValueChanged<int> onChanged;
+  final Map<int, int> readyCounts;
+  final bool enabled;
+
+  /// A Karta table: "Up to N at the table".
+  final bool seats;
+
+  static String label(int count, {bool seats = false}) =>
+      seats ? 'Up to $count at the table' : (count == 2 ? '1 v 1' : '$count players');
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      label: seats ? 'Seats at the table' : 'Players',
+      child: Row(children: [
+        for (final count in counts) ...[
+          if (count != counts.first) const SizedBox(width: 8),
+          Expanded(
+            child: Semantics(
+              button: true,
+              selected: count == selected,
+              label: '${label(count, seats: seats)}${(readyCounts[count] ?? 0) > 0 ? ', ${readyCounts[count]} ready' : ''}',
+              excludeSemantics: true,
+              child: Material(
+                color: count == selected ? palette.selected : palette.surfaceAlt,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: count == selected ? AppColors.gold : palette.border, width: count == selected ? 1.5 : 1),
+                ),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: enabled && count != selected
+                      ? () {
+                          HapticFeedback.selectionClick();
+                          onChanged(count);
+                        }
+                      : null,
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 44),
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(
+                          count == 2 ? Icons.people_alt_rounded : Icons.groups_rounded,
+                          size: 18,
+                          color: count == selected ? scheme.primary : scheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          count == 2 && !seats ? '1v1' : '$count',
+                          style: AppType.ui(
+                            size: 15,
+                            weight: FontWeight.w700,
+                            color: count == selected ? scheme.primary : scheme.onSurface,
+                          ),
+                        ),
+                        if ((readyCounts[count] ?? 0) > 0) ...[
+                          const SizedBox(width: 6),
+                          LiveDot(size: 6, color: palette.live),
+                          const SizedBox(width: 3),
+                          Text('${readyCounts[count]}', style: AppType.ui(size: 12, weight: FontWeight.w700, color: palette.live)),
+                        ],
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+/// "4p" next to a stake or a player: a 3–4 player table (or Karta table seats).
+class PlayersTag extends StatelessWidget {
+  const PlayersTag({super.key, required this.count, this.table = false});
+  final int count;
+  final bool table;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final palette = AppPalette.of(context);
+    return Semantics(
+      label: table ? 'Table of $count' : '$count players',
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: palette.border)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(table ? Icons.table_restaurant_rounded : Icons.groups_rounded, size: 13, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 3),
+          Text('$count', style: AppType.ui(size: 12, weight: FontWeight.w700, color: scheme.onSurfaceVariant)),
+        ]),
+      ),
     );
   }
 }

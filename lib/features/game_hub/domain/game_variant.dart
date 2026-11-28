@@ -83,9 +83,27 @@ abstract final class GameVariants {
     rule: 'If you can send a token home but move another, you lose the match.',
   );
 
+  // Karta: a 1v1 match, or a queue table where the round winner keeps dealing.
+  static const kartaClassic = GameVariant(
+    gameCode: 'KARTA',
+    rulesVersion: 'KARTA_LATLAT_V1',
+    name: 'ሁለት ለሁለት',
+    hint: 'መጀመሪያ 3 ዙር ያሸነፈ',
+    rule: 'One opponent: the first to win 3 rounds takes the pot.',
+    isDefault: true,
+  );
+  static const kartaTable = GameVariant(
+    gameCode: 'KARTA',
+    rulesVersion: 'KARTA_TABLE_V1',
+    name: 'ጠረጴዛ',
+    hint: 'ያሸነፈ ያከፋፍላል፣ ዙሩ ወዲያው ይከፈላል',
+    rule: 'Up to 4 at a table. Each round is 1v1 and pays at once; the winner keeps dealing and the next in line plays.',
+  );
+
   static const _byGame = <String, List<GameVariant>>{
     'DAMA': [damaForward, damaClassic],
     'LUDO': [ludoClassic, ludoNoCapture, ludoMissedCapture],
+    'KARTA': [kartaClassic, kartaTable],
   };
 
   /// A game's types in the order players see them (empty: the game has none).
